@@ -11,6 +11,7 @@ public class FileDbContext : DbContext
 
     public DbSet<FileRecord> FileRecords { get; set; }
     public DbSet<FileVersion> FileVersions { get; set; }
+    public DbSet<UploadSession> UploadSessions { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -50,6 +51,33 @@ public class FileDbContext : DbContext
             entity.Property(e => e.LocalCachePath).HasMaxLength(1000);
             entity.Property(e => e.CreatedBy).HasMaxLength(200);
             entity.Property(e => e.ChangeDescription).HasMaxLength(500);
+        });
+
+        // UploadSession 配置
+        modelBuilder.Entity<UploadSession>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.ExpiresAt);
+            entity.HasIndex(e => e.FileHash);
+            entity.HasIndex(e => e.FileRecordId);
+            
+            entity.Property(e => e.FileName).HasMaxLength(500);
+            entity.Property(e => e.ContentType).HasMaxLength(200);
+            entity.Property(e => e.FileHash).HasMaxLength(64);
+            entity.Property(e => e.Folder).HasMaxLength(1000);
+            entity.Property(e => e.TempPath).HasMaxLength(1000);
+            entity.Property(e => e.UploadedChunks).HasMaxLength(4000);
+            
+            entity.HasOne(e => e.FileRecord)
+                  .WithMany()
+                  .HasForeignKey(e => e.FileRecordId)
+                  .OnDelete(DeleteBehavior.SetNull);
+                  
+            entity.HasOne(e => e.FileVersion)
+                  .WithMany()
+                  .HasForeignKey(e => e.FileVersionId)
+                  .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

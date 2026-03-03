@@ -37,7 +37,7 @@ builder.Services.AddSwaggerGen(c =>
         return docName.ToLower() switch
         {
             "minio" => controllerName is "files" or "buckets" or "folders",
-            "filecache" => controllerName is "filecache" or "fileversions",
+            "filecache" => controllerName is "filecache" or "fileversions" or "chunkedupload",
             _ => false
         };
     });
@@ -108,6 +108,9 @@ builder.Services.AddScoped<IFileCacheService, FileCacheService>();
 
 // Add File Version Service（版本管理服务）
 builder.Services.AddScoped<IFileVersionService, FileVersionService>();
+
+// Add Chunked Upload Service（分片上传服务）
+builder.Services.AddScoped<IChunkedUploadService, ChunkedUploadService>();
 
 var app = builder.Build();
 
