@@ -10,15 +10,45 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
-// Add Swagger
+// Add Swagger with multiple API groups
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new()
+    // MinIO 存储服务 API
+    c.SwaggerDoc("minio", new()
     {
-        Title = "MinIO 文件存储服务 API",
+        Title = "MinIO 对象存储 API",
         Version = "v1",
-        Description = "基于 ASP.NET Core 和 MinIO 的文件上传、下载、管理 API，支持数据库记录和本地缓存"
+        Description = "基于 MinIO 的对象存储服务，支持文件上传、下载、Bucket 和文件夹管理"
     });
+
+    // 文件缓存服务 API
+    c.SwaggerDoc("filecache", new()
+    {
+        Title = "文件缓存与版本管理 API",
+        Version = "v1",
+        Description = "基于数据库的文件缓存服务，支持版本管理、本地缓存、历史版本恢复"
+    });
+
+    // 配置 API 分组
+    c.DocInclusionPredicate((docName, apiDesc) =>
+    {
+        var controllerName = apiDesc.ActionDescriptor.RouteValues["controller"]?.ToLower();
+        
+        return docName.ToLower() switch
+        {
+            "minio" => controllerName is "files" or "buckets" or "folders",
+            "filecache" => controllerName is "filecache" or "fileversions",
+            _ => false
+        };
+    });
+
+    // 添加中文注释支持
+    var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+    var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+    if (File.Exists(xmlPath))
+    {
+        c.IncludeXmlComments(xmlPath);
+    }
 });
 
 // Configure Database
@@ -76,6 +106,9 @@ else
 // Add File Cache Service（使用 IStorageProvider 抽象）
 builder.Services.AddScoped<IFileCacheService, FileCacheService>();
 
+// Add File Version Service（版本管理服务）
+builder.Services.AddScoped<IFileVersionService, FileVersionService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -84,8 +117,13 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI(c =>
     {
-        c.SwaggerEndpoint("/swagger/v1/swagger.json", "MinIO 文件存储服务 API V1");
-        c.DocumentTitle = "MinIO 文件存储服务 - Swagger UI";
+        // 配置多个 Swagger 文档入口
+        c.SwaggerEndpoint("/swagger/minio/swagger.json", "MinIO 对象存储 API");
+        c.SwaggerEndpoint("/swagger/filecache/swagger.json", "文件缓存与版本管理 API");
+        c.DocumentTitle = "文件存储服务 - Swagger UI";
+        
+        // 默认展开所有 API
+        c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
     });
 }
 

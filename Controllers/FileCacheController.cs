@@ -18,7 +18,7 @@ public class FileCacheController : ControllerBase
     }
 
     /// <summary>
-    /// 上传文件并记录到数据库（支持文件夹路径）
+    /// 上传文件并创建新版本（支持文件夹路径）
     /// </summary>
     [HttpPost("upload")]
     public async Task<IActionResult> UploadFile(
@@ -26,6 +26,7 @@ public class FileCacheController : ControllerBase
         [FromQuery] string? folder = null,
         [FromQuery] string? description = null,
         [FromQuery] string? tags = null,
+        [FromQuery] string? changeDescription = null,
         CancellationToken cancellationToken = default)
     {
         if (file == null || file.Length == 0)
@@ -35,16 +36,18 @@ public class FileCacheController : ControllerBase
 
         try
         {
-            var record = await _fileCacheService.UploadAndRecordAsync(file, folder, description, tags, cancellationToken);
+            var version = await _fileCacheService.UploadAndRecordAsync(file, folder, description, tags, changeDescription, cancellationToken);
             return Ok(new
             {
                 message = "文件上传成功",
-                fileId = record.Id,
-                fileName = record.FileName,
-                objectName = record.ObjectName,
-                size = record.Size,
-                fileHash = record.FileHash,
-                createdAt = record.CreatedAt
+                fileId = version.FileRecordId,
+                versionId = version.Id,
+                versionNumber = version.VersionNumber,
+                fileName = version.FileRecord?.FileName ?? file.FileName,
+                size = version.Size,
+                fileHash = version.FileHash,
+                createdAt = version.CreatedAt,
+                isLatest = version.IsLatest
             });
         }
         catch (Exception ex)
@@ -55,15 +58,16 @@ public class FileCacheController : ControllerBase
     }
 
     /// <summary>
-    /// 下载单个文件（自动使用本地缓存或从MinIO下载）
+    /// 下载文件最新版本
     /// </summary>
     [HttpGet("download/{fileId}")]
     public async Task<IActionResult> DownloadFile(Guid fileId, CancellationToken cancellationToken = default)
     {
         try
         {
-            var (stream, record) = await _fileCacheService.GetFileAsync(fileId, cancellationToken);
-            return File(stream, record.ContentType, record.FileName);
+            var (stream, version) = await _fileCacheService.GetFileAsync(fileId, cancellationToken);
+            var fileName = version.FileRecord?.FileName ?? $"file_{fileId}";
+            return File(stream, "application/octet-stream", fileName);
         }
         catch (FileNotFoundException)
         {
@@ -104,15 +108,16 @@ public class FileCacheController : ControllerBase
     }
 
     /// <summary>
-    /// 获取文件记录列表
+    /// 获取文件列表
     /// </summary>
     [HttpGet("list")]
     public async Task<IActionResult> GetFileRecords(
         [FromQuery] string? search = null,
         [FromQuery] string? tags = null,
+        [FromQuery] bool includeDeleted = false,
         CancellationToken cancellationToken = default)
     {
-        var records = await _fileCacheService.GetFileRecordsAsync(search, tags, cancellationToken);
+        var records = await _fileCacheService.GetFileRecordsAsync(search, tags, includeDeleted, cancellationToken);
         return Ok(new
         {
             count = records.Count,
@@ -120,48 +125,92 @@ public class FileCacheController : ControllerBase
             {
                 r.Id,
                 r.FileName,
-                r.ObjectName,
-                r.Size,
                 r.ContentType,
-                r.FileHash,
-                r.IsCachedLocally,
-                r.LastSyncedAt,
+                r.VersionCount,
                 r.CreatedAt,
+                r.UpdatedAt,
                 r.Description,
-                r.Tags
+                r.Tags,
+                r.IsDeleted,
+                currentVersion = r.CurrentVersion == null ? null : new
+                {
+                    r.CurrentVersion.Id,
+                    r.CurrentVersion.VersionNumber,
+                    r.CurrentVersion.Size,
+                    r.CurrentVersion.FileHash,
+                    r.CurrentVersion.CreatedAt
+                }
             })
         });
     }
 
     /// <summary>
-    /// 获取单个文件记录详情
+    /// 获取文件详情（含版本列表）
     /// </summary>
     [HttpGet("{fileId}")]
     public async Task<IActionResult> GetFileRecord(Guid fileId, CancellationToken cancellationToken = default)
     {
-        var records = await _fileCacheService.GetFileRecordsAsync(cancellationToken: cancellationToken);
-        var record = records.FirstOrDefault(r => r.Id == fileId);
+        var record = await _fileCacheService.GetFileRecordAsync(fileId, cancellationToken);
         
         if (record == null)
         {
             return NotFound(new { message = "文件记录不存在", fileId });
         }
 
-        return Ok(record);
+        return Ok(new
+        {
+            record.Id,
+            record.FileName,
+            record.ContentType,
+            record.Description,
+            record.Tags,
+            record.VersionCount,
+            record.CreatedAt,
+            record.UpdatedAt,
+            record.IsDeleted,
+            record.DeletedAt,
+            currentVersion = record.CurrentVersion == null ? null : new
+            {
+                record.CurrentVersion.Id,
+                record.CurrentVersion.VersionNumber,
+                record.CurrentVersion.Size,
+                record.CurrentVersion.FileHash,
+                record.CurrentVersion.CreatedAt,
+                record.CurrentVersion.ChangeDescription
+            },
+            versions = record.Versions.Select(v => new
+            {
+                v.Id,
+                v.VersionNumber,
+                v.Size,
+                v.FileHash,
+                v.CreatedAt,
+                v.ChangeDescription,
+                v.IsLatest,
+                v.IsDeleted,
+                v.IsCachedLocally
+            })
+        });
     }
 
     /// <summary>
-    /// 同步文件（检查本地缓存与远程一致性）
+    /// 同步文件最新版本（检查本地缓存与远程一致性）
     /// </summary>
     [HttpPost("sync/{fileId}")]
     public async Task<IActionResult> SyncFile(Guid fileId, CancellationToken cancellationToken = default)
     {
         try
         {
-            var success = await _fileCacheService.SyncFileAsync(fileId, cancellationToken);
+            var record = await _fileCacheService.GetFileRecordAsync(fileId, cancellationToken);
+            if (record?.CurrentVersion == null)
+            {
+                return NotFound(new { message = "文件或版本不存在", fileId });
+            }
+
+            var success = await _fileCacheService.SyncFileAsync(record.CurrentVersion.Id, cancellationToken);
             if (success)
             {
-                return Ok(new { message = "文件同步成功", fileId });
+                return Ok(new { message = "文件同步成功", fileId, versionId = record.CurrentVersion.Id });
             }
             return BadRequest(new { message = "文件同步失败", fileId });
         }
@@ -180,10 +229,16 @@ public class FileCacheController : ControllerBase
     {
         try
         {
-            var success = await _fileCacheService.RefreshCacheAsync(fileId, cancellationToken);
+            var record = await _fileCacheService.GetFileRecordAsync(fileId, cancellationToken);
+            if (record?.CurrentVersion == null)
+            {
+                return NotFound(new { message = "文件或版本不存在", fileId });
+            }
+
+            var success = await _fileCacheService.RefreshCacheAsync(record.CurrentVersion.Id, cancellationToken);
             if (success)
             {
-                return Ok(new { message = "缓存刷新成功", fileId });
+                return Ok(new { message = "缓存刷新成功", fileId, versionId = record.CurrentVersion.Id });
             }
             return NotFound(new { message = "文件不存在", fileId });
         }
@@ -195,17 +250,17 @@ public class FileCacheController : ControllerBase
     }
 
     /// <summary>
-    /// 删除文件（数据库+MinIO+本地缓存）
+    /// 软删除文件（可恢复）
     /// </summary>
     [HttpDelete("{fileId}")]
-    public async Task<IActionResult> DeleteFile(Guid fileId, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> SoftDeleteFile(Guid fileId, CancellationToken cancellationToken = default)
     {
         try
         {
-            var success = await _fileCacheService.DeleteFileAsync(fileId, cancellationToken);
+            var success = await _fileCacheService.SoftDeleteFileAsync(fileId, cancellationToken);
             if (success)
             {
-                return Ok(new { message = "文件删除成功", fileId });
+                return Ok(new { message = "文件已软删除", fileId });
             }
             return NotFound(new { message = "文件不存在", fileId });
         }
@@ -213,6 +268,50 @@ public class FileCacheController : ControllerBase
         {
             _logger.LogError(ex, "文件删除失败: {FileId}", fileId);
             return StatusCode(500, new { message = "文件删除失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 恢复软删除的文件
+    /// </summary>
+    [HttpPost("{fileId}/undelete")]
+    public async Task<IActionResult> UndeleteFile(Guid fileId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var success = await _fileCacheService.UndeleteFileAsync(fileId, cancellationToken);
+            if (success)
+            {
+                return Ok(new { message = "文件已恢复", fileId });
+            }
+            return NotFound(new { message = "文件不存在或未删除", fileId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "文件恢复失败: {FileId}", fileId);
+            return StatusCode(500, new { message = "文件恢复失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 彻底删除文件及所有版本
+    /// </summary>
+    [HttpDelete("{fileId}/permanent")]
+    public async Task<IActionResult> PermanentlyDeleteFile(Guid fileId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var success = await _fileCacheService.PermanentlyDeleteFileAsync(fileId, cancellationToken);
+            if (success)
+            {
+                return Ok(new { message = "文件及所有版本已彻底删除", fileId });
+            }
+            return NotFound(new { message = "文件不存在", fileId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "彻底删除文件失败: {FileId}", fileId);
+            return StatusCode(500, new { message = "彻底删除文件失败", error = ex.Message });
         }
     }
 
