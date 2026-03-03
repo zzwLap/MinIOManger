@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MinIOStorageService", "MinIOStorageService.csproj", "{3F5BC5FB-F558-A7FE-6DD5-C4A1A19E1FAE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3F5BC5FB-F558-A7FE-6DD5-C4A1A19E1FAE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3F5BC5FB-F558-A7FE-6DD5-C4A1A19E1FAE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3F5BC5FB-F558-A7FE-6DD5-C4A1A19E1FAE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3F5BC5FB-F558-A7FE-6DD5-C4A1A19E1FAE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {11CFB411-E5FD-470C-9400-7D9400540210}
+	EndGlobalSection
+EndGlobal
