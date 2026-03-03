@@ -12,6 +12,7 @@ public class FileDbContext : DbContext
     public DbSet<FileRecord> FileRecords { get; set; }
     public DbSet<FileVersion> FileVersions { get; set; }
     public DbSet<UploadSession> UploadSessions { get; set; }
+    public DbSet<DownloadTask> DownloadTasks { get; set; }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -78,6 +79,25 @@ public class FileDbContext : DbContext
                   .WithMany()
                   .HasForeignKey(e => e.FileVersionId)
                   .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // DownloadTask 配置
+        modelBuilder.Entity<DownloadTask>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.FileVersionId);
+            entity.HasIndex(e => e.ClientId);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.ExpiresAt);
+            
+            entity.Property(e => e.ClientId).HasMaxLength(200);
+            entity.Property(e => e.DownloadedChunks).HasMaxLength(4000);
+            entity.Property(e => e.ErrorMessage).HasMaxLength(1000);
+            
+            entity.HasOne(e => e.FileVersion)
+                  .WithMany()
+                  .HasForeignKey(e => e.FileVersionId)
+                  .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

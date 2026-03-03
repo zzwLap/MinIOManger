@@ -106,6 +106,78 @@ public class LocalFileProvider : IStorageProvider
         return Task.FromResult<Stream>(stream);
     }
 
+    public Task<Stream> GetRangeStreamAsync(string objectName, long start, long? end = null, CancellationToken cancellationToken = default)
+    {
+        var filePath = GetFullPath(objectName);
+        
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"File not found: {objectName}");
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        var fileLength = fileInfo.Length;
+
+        // 验证范围
+        if (start < 0 || start >= fileLength)
+        {
+            throw new ArgumentOutOfRangeException(nameof(start), "Start position is out of range");
+        }
+
+        var actualEnd = end ?? fileLength - 1;
+        if (actualEnd >= fileLength)
+        {
+            actualEnd = fileLength - 1;
+        }
+
+        if (start > actualEnd)
+        {
+            throw new ArgumentException("Start position cannot be greater than end position");
+        }
+
+        var stream = File.OpenRead(filePath);
+        stream.Seek(start, SeekOrigin.Begin);
+
+        // 返回限制长度的流
+        var rangeLength = actualEnd - start + 1;
+        var limitedStream = new RangeStream(stream, rangeLength);
+        
+        _logger.LogDebug("Range stream created: {ObjectName}, bytes {Start}-{End}", objectName, start, actualEnd);
+        return Task.FromResult<Stream>(limitedStream);
+    }
+
+    public Task<long> GetFileSizeAsync(string objectName, CancellationToken cancellationToken = default)
+    {
+        var filePath = GetFullPath(objectName);
+        
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"File not found: {objectName}");
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        return Task.FromResult(fileInfo.Length);
+    }
+
+    public Task<string> GetPresignedDownloadUrlAsync(string objectName, TimeSpan expiration, long? start = null, long? end = null, CancellationToken cancellationToken = default)
+    {
+        // 本地存储不支持预签名URL，返回本地文件路径
+        // 客户端需要通过 API 代理下载
+        var filePath = GetFullPath(objectName);
+        
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"File not found: {objectName}");
+        }
+
+        // 返回特殊格式的URL，表示需要通过API下载
+        var rangeParam = start.HasValue ? $"&start={start}" : "";
+        rangeParam += end.HasValue ? $"&end={end}" : "";
+        
+        var url = $"/api/download/local/{Uri.EscapeDataString(objectName)}?expires={DateTimeOffset.UtcNow.Add(expiration).ToUnixTimeSeconds()}{rangeParam}";
+        return Task.FromResult(url);
+    }
+
     private string GetFullPath(string objectName)
     {
         // 将对象名称中的 / 转换为路径分隔符

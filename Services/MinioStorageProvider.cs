@@ -105,6 +105,64 @@ public class MinioStorageProvider : IStorageProvider
         return memoryStream;
     }
 
+    public async Task<Stream> GetRangeStreamAsync(string objectName, long start, long? end = null, CancellationToken cancellationToken = default)
+    {
+        var memoryStream = new MemoryStream();
+        
+        // MinIO SDK 7.0 支持 WithOffsetAndLength 实现 Range 读取
+        var getObjectArgs = new GetObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(objectName)
+            .WithOffsetAndLength(start, end.HasValue ? end.Value - start + 1 : 0)
+            .WithCallbackStream(stream =>
+            {
+                stream.CopyTo(memoryStream);
+                memoryStream.Position = 0;
+            });
+
+        await _minioClient.GetObjectAsync(getObjectArgs, cancellationToken);
+        return memoryStream;
+    }
+
+    public async Task<long> GetFileSizeAsync(string objectName, CancellationToken cancellationToken = default)
+    {
+        var statObjectArgs = new StatObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(objectName);
+
+        var stat = await _minioClient.StatObjectAsync(statObjectArgs, cancellationToken);
+        return stat.Size;
+    }
+
+    public async Task<string> GetPresignedDownloadUrlAsync(string objectName, TimeSpan expiration, long? start = null, long? end = null, CancellationToken cancellationToken = default)
+    {
+        // 构建请求参数
+        var presignedGetObjectArgs = new PresignedGetObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(objectName)
+            .WithExpiry((int)expiration.TotalSeconds);
+
+        // 如果指定了范围，添加到请求
+        if (start.HasValue || end.HasValue)
+        {
+            var range = start.HasValue && end.HasValue
+                ? $"bytes={start.Value}-{end.Value}"
+                : start.HasValue
+                    ? $"bytes={start.Value}-"
+                    : $"bytes=0-{end.Value}";
+            
+            // MinIO SDK 6.x 可能不支持直接在预签名URL中添加Range
+            // 需要在客户端添加 Range 头部
+        }
+
+        var url = await _minioClient.PresignedGetObjectAsync(presignedGetObjectArgs);
+        
+        _logger.LogDebug("Generated presigned URL for {ObjectName}, expires in {Expiration}s", 
+            objectName, expiration.TotalSeconds);
+        
+        return url;
+    }
+
     private async Task EnsureBucketExistsAsync(CancellationToken cancellationToken)
     {
         var bucketExistsArgs = new BucketExistsArgs()

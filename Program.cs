@@ -37,7 +37,7 @@ builder.Services.AddSwaggerGen(c =>
         return docName.ToLower() switch
         {
             "minio" => controllerName is "files" or "buckets" or "folders",
-            "filecache" => controllerName is "filecache" or "fileversions" or "chunkedupload",
+            "filecache" => controllerName is "filecache" or "fileversions" or "chunkedupload" or "chunkeddownload",
             _ => false
         };
     });
