@@ -10,13 +10,6 @@ public class FileMetadata
     public string ETag { get; set; } = string.Empty;
 }
 
-public class UploadResult
-{
-    public bool Success { get; set; }
-    public string ObjectName { get; set; } = string.Empty;
-    public string Message { get; set; } = string.Empty;
-}
-
 public class BatchDownloadRequest
 {
     public List<string> ObjectNames { get; set; } = new();

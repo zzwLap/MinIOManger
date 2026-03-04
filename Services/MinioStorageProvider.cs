@@ -53,22 +53,14 @@ public class MinioStorageProvider : IStorageProvider
 
     public async Task<bool> DeleteAsync(string objectName, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var removeObjectArgs = new RemoveObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(objectName);
+        var removeObjectArgs = new RemoveObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(objectName);
 
-            await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
-            
-            _logger.LogInformation("File deleted from MinIO: {ObjectName}", objectName);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete file from MinIO: {ObjectName}", objectName);
-            return false;
-        }
+        await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
+        
+        _logger.LogInformation("File deleted from MinIO: {ObjectName}", objectName);
+        return true;
     }
 
     public async Task<bool> ExistsAsync(string objectName, CancellationToken cancellationToken = default)
@@ -82,7 +74,7 @@ public class MinioStorageProvider : IStorageProvider
             await _minioClient.StatObjectAsync(statObjectArgs, cancellationToken);
             return true;
         }
-        catch
+        catch (Minio.Exceptions.ObjectNotFoundException)
         {
             return false;
         }

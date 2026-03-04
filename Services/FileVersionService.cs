@@ -235,55 +235,47 @@ public class FileVersionService : IFileVersionService
         var version = await _dbContext.FileVersions.FindAsync(new object[] { versionId }, cancellationToken);
         if (version == null) return false;
 
-        try
+        // 删除存储中的文件
+        await _storageProvider.DeleteAsync(version.ObjectName, cancellationToken);
+
+        // 删除本地缓存
+        if (!string.IsNullOrEmpty(version.LocalCachePath) && File.Exists(version.LocalCachePath))
         {
-            // 删除存储中的文件
-            await _storageProvider.DeleteAsync(version.ObjectName, cancellationToken);
+            File.Delete(version.LocalCachePath);
+        }
 
-            // 删除本地缓存
-            if (!string.IsNullOrEmpty(version.LocalCachePath) && File.Exists(version.LocalCachePath))
+        // 删除数据库记录
+        _dbContext.FileVersions.Remove(version);
+
+        // 更新文件记录
+        var fileRecord = await _dbContext.FileRecords
+            .Include(f => f.Versions)
+            .FirstOrDefaultAsync(f => f.Id == version.FileRecordId, cancellationToken);
+
+        if (fileRecord != null)
+        {
+            fileRecord.VersionCount = fileRecord.Versions.Count(v => v.Id != versionId && !v.IsDeleted);
+            
+            if (fileRecord.CurrentVersionId == versionId)
             {
-                File.Delete(version.LocalCachePath);
-            }
-
-            // 删除数据库记录
-            _dbContext.FileVersions.Remove(version);
-
-            // 更新文件记录
-            var fileRecord = await _dbContext.FileRecords
-                .Include(f => f.Versions)
-                .FirstOrDefaultAsync(f => f.Id == version.FileRecordId, cancellationToken);
-
-            if (fileRecord != null)
-            {
-                fileRecord.VersionCount = fileRecord.Versions.Count(v => v.Id != versionId && !v.IsDeleted);
+                var newLatest = fileRecord.Versions
+                    .Where(v => v.Id != versionId && !v.IsDeleted)
+                    .OrderByDescending(v => v.VersionNumber)
+                    .FirstOrDefault();
                 
-                if (fileRecord.CurrentVersionId == versionId)
-                {
-                    var newLatest = fileRecord.Versions
-                        .Where(v => v.Id != versionId && !v.IsDeleted)
-                        .OrderByDescending(v => v.VersionNumber)
-                        .FirstOrDefault();
-                    
-                    fileRecord.CurrentVersionId = newLatest?.Id;
-                }
-
-                // 如果没有版本了，删除文件记录
-                if (!fileRecord.Versions.Any(v => v.Id != versionId))
-                {
-                    _dbContext.FileRecords.Remove(fileRecord);
-                }
+                fileRecord.CurrentVersionId = newLatest?.Id;
             }
 
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            _logger.LogInformation("Version permanently deleted: {VersionId}", versionId);
-            return true;
+            // 如果没有版本了，删除文件记录
+            if (!fileRecord.Versions.Any(v => v.Id != versionId))
+            {
+                _dbContext.FileRecords.Remove(fileRecord);
+            }
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to permanently delete version: {VersionId}", versionId);
-            return false;
-        }
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Version permanently deleted: {VersionId}", versionId);
+        return true;
     }
 
     public async Task<bool> PermanentlyDeleteFileAsync(Guid fileRecordId, CancellationToken cancellationToken = default)
@@ -294,31 +286,23 @@ public class FileVersionService : IFileVersionService
 
         if (fileRecord == null) return false;
 
-        try
+        // 删除所有版本
+        foreach (var version in fileRecord.Versions)
         {
-            // 删除所有版本
-            foreach (var version in fileRecord.Versions)
+            await _storageProvider.DeleteAsync(version.ObjectName, cancellationToken);
+            
+            if (!string.IsNullOrEmpty(version.LocalCachePath) && File.Exists(version.LocalCachePath))
             {
-                await _storageProvider.DeleteAsync(version.ObjectName, cancellationToken);
-                
-                if (!string.IsNullOrEmpty(version.LocalCachePath) && File.Exists(version.LocalCachePath))
-                {
-                    File.Delete(version.LocalCachePath);
-                }
+                File.Delete(version.LocalCachePath);
             }
-
-            // 删除数据库记录
-            _dbContext.FileRecords.Remove(fileRecord);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("File and all versions permanently deleted: {FileId}", fileRecordId);
-            return true;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to permanently delete file: {FileId}", fileRecordId);
-            return false;
-        }
+
+        // 删除数据库记录
+        _dbContext.FileRecords.Remove(fileRecord);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("File and all versions permanently deleted: {FileId}", fileRecordId);
+        return true;
     }
 
     public async Task<int> CleanupOldVersionsAsync(Guid fileRecordId, int keepVersions, CancellationToken cancellationToken = default)

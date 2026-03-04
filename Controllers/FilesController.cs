@@ -32,14 +32,14 @@ public class FilesController : ControllerBase
             return BadRequest(new { message = "请选择要上传的文件" });
         }
 
-        var result = await _minioService.UploadFileAsync(file, folder, cancellationToken: cancellationToken);
+        var objectName = await _minioService.UploadFileAsync(file, folder, cancellationToken: cancellationToken);
 
-        if (result.Success)
+        return Ok(new
         {
-            return Ok(result);
-        }
-
-        return BadRequest(result);
+            Success = true,
+            ObjectName = objectName,
+            Message = "文件上传成功"
+        });
     }
 
     /// <summary>
@@ -58,14 +58,14 @@ public class FilesController : ControllerBase
             return BadRequest(new { message = "请指定完整的文件路径" });
         }
 
-        var result = await _minioService.UploadFileWithPathAsync(file, fullPath, cancellationToken);
+        var objectName = await _minioService.UploadFileWithPathAsync(file, fullPath, cancellationToken);
 
-        if (result.Success)
+        return Ok(new
         {
-            return Ok(result);
-        }
-
-        return BadRequest(result);
+            Success = true,
+            ObjectName = objectName,
+            Message = "文件上传成功"
+        });
     }
 
     /// <summary>
@@ -79,21 +79,25 @@ public class FilesController : ControllerBase
             return BadRequest(new { message = "请选择要上传的文件" });
         }
 
-        var results = new List<UploadResult>();
+        var results = new List<object>();
         foreach (var file in files)
         {
             if (file.Length > 0)
             {
-                var result = await _minioService.UploadFileAsync(file, cancellationToken: cancellationToken);
-                results.Add(result);
+                var objectName = await _minioService.UploadFileAsync(file, cancellationToken: cancellationToken);
+                results.Add(new
+                {
+                    Success = true,
+                    ObjectName = objectName,
+                    Message = "文件上传成功"
+                });
             }
         }
 
         return Ok(new
         {
             totalCount = files.Count,
-            successCount = results.Count(r => r.Success),
-            failedCount = results.Count(r => !r.Success),
+            successCount = results.Count,
             results
         });
     }

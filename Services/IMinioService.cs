@@ -5,8 +5,8 @@ namespace MinIOStorageService.Services;
 public interface IMinioService
 {
     // 文件操作
-    Task<UploadResult> UploadFileAsync(IFormFile file, string? folder = null, string? objectName = null, CancellationToken cancellationToken = default);
-    Task<UploadResult> UploadFileWithPathAsync(IFormFile file, string fullPath, CancellationToken cancellationToken = default);
+    Task<string> UploadFileAsync(IFormFile file, string? folder = null, string? objectName = null, CancellationToken cancellationToken = default);
+    Task<string> UploadFileWithPathAsync(IFormFile file, string fullPath, CancellationToken cancellationToken = default);
     Task<Stream> DownloadFileAsync(string objectName, CancellationToken cancellationToken = default);
     Task<FileMetadata?> GetFileMetadataAsync(string objectName, CancellationToken cancellationToken = default);
     Task<bool> DeleteFileAsync(string objectName, CancellationToken cancellationToken = default);

@@ -326,31 +326,23 @@ public class FileCacheService : IFileCacheService
 
         if (fileRecord == null) return false;
 
-        try
+        // 删除所有版本的存储对象和缓存
+        foreach (var version in fileRecord.Versions)
         {
-            // 删除所有版本的存储对象和缓存
-            foreach (var version in fileRecord.Versions)
+            await _storageProvider.DeleteAsync(version.ObjectName, cancellationToken);
+            
+            if (!string.IsNullOrEmpty(version.LocalCachePath) && File.Exists(version.LocalCachePath))
             {
-                await _storageProvider.DeleteAsync(version.ObjectName, cancellationToken);
-                
-                if (!string.IsNullOrEmpty(version.LocalCachePath) && File.Exists(version.LocalCachePath))
-                {
-                    File.Delete(version.LocalCachePath);
-                }
+                File.Delete(version.LocalCachePath);
             }
-
-            // 删除数据库记录
-            _dbContext.FileRecords.Remove(fileRecord);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-
-            _logger.LogInformation("File and all versions permanently deleted: {FileId}", fileId);
-            return true;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to permanently delete file: {FileId}", fileId);
-            return false;
-        }
+
+        // 删除数据库记录
+        _dbContext.FileRecords.Remove(fileRecord);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("File and all versions permanently deleted: {FileId}", fileId);
+        return true;
     }
 
     public async Task<int> CleanExpiredCacheAsync(TimeSpan maxAge, CancellationToken cancellationToken = default)

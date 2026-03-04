@@ -61,29 +61,21 @@ public class LocalFileProvider : IStorageProvider
             return Task.FromResult(false);
         }
 
-        try
+        File.Delete(filePath);
+        
+        // 尝试清理空目录
+        var directory = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
         {
-            File.Delete(filePath);
-            
-            // 尝试清理空目录
-            var directory = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrEmpty(directory) && Directory.Exists(directory))
+            var dirInfo = new DirectoryInfo(directory);
+            if (!dirInfo.EnumerateFileSystemInfos().Any())
             {
-                var dirInfo = new DirectoryInfo(directory);
-                if (!dirInfo.EnumerateFileSystemInfos().Any())
-                {
-                    Directory.Delete(directory);
-                }
+                Directory.Delete(directory);
             }
-            
-            _logger.LogInformation("File deleted from local storage: {ObjectName}", objectName);
-            return Task.FromResult(true);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete file: {ObjectName}", objectName);
-            return Task.FromResult(false);
-        }
+        
+        _logger.LogInformation("File deleted from local storage: {ObjectName}", objectName);
+        return Task.FromResult(true);
     }
 
     public Task<bool> ExistsAsync(string objectName, CancellationToken cancellationToken = default)

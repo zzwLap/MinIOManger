@@ -19,48 +19,31 @@ public class MinioService : IMinioService
         _logger = logger;
     }
 
-    public async Task<UploadResult> UploadFileAsync(IFormFile file, string? folder = null, string? objectName = null, CancellationToken cancellationToken = default)
+    public async Task<string> UploadFileAsync(IFormFile file, string? folder = null, string? objectName = null, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await EnsureBucketExistsAsync(cancellationToken);
+        await EnsureBucketExistsAsync(cancellationToken);
 
-            var fileName = objectName ?? $"{Guid.NewGuid()}_{file.FileName}";
-            
-            // 构建完整路径（包含文件夹）
-            var fullPath = string.IsNullOrEmpty(folder) 
-                ? fileName 
-                : $"{folder.TrimEnd('/')}/{fileName}";
-            
-            using var stream = file.OpenReadStream();
-            
-            var putObjectArgs = new PutObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(fullPath)
-                .WithStreamData(stream)
-                .WithObjectSize(file.Length)
-                .WithContentType(file.ContentType);
+        var fileName = objectName ?? $"{Guid.NewGuid()}_{file.FileName}";
+        
+        // 构建完整路径（包含文件夹）
+        var fullPath = string.IsNullOrEmpty(folder) 
+            ? fileName 
+            : $"{folder.TrimEnd('/')}/{fileName}";
+        
+        using var stream = file.OpenReadStream();
+        
+        var putObjectArgs = new PutObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(fullPath)
+            .WithStreamData(stream)
+            .WithObjectSize(file.Length)
+            .WithContentType(file.ContentType);
 
-            await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
+        await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
 
-            _logger.LogInformation("File uploaded successfully: {FullPath}", fullPath);
+        _logger.LogInformation("File uploaded successfully: {FullPath}", fullPath);
 
-            return new UploadResult
-            {
-                Success = true,
-                ObjectName = fullPath,
-                Message = "文件上传成功"
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to upload file: {FileName}", file.FileName);
-            return new UploadResult
-            {
-                Success = false,
-                Message = $"文件上传失败: {ex.Message}"
-            };
-        }
+        return fullPath;
     }
 
     public async Task<Stream> DownloadFileAsync(string objectName, CancellationToken cancellationToken = default)
@@ -109,21 +92,13 @@ public class MinioService : IMinioService
 
     public async Task<bool> DeleteFileAsync(string objectName, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var removeObjectArgs = new RemoveObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(objectName);
+        var removeObjectArgs = new RemoveObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(objectName);
 
-            await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
-            _logger.LogInformation("File deleted successfully: {ObjectName}", objectName);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete file: {ObjectName}", objectName);
-            return false;
-        }
+        await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
+        _logger.LogInformation("File deleted successfully: {ObjectName}", objectName);
+        return true;
     }
 
     public async Task<List<FileMetadata>> ListFilesAsync(string? prefix = null, CancellationToken cancellationToken = default)
@@ -163,7 +138,7 @@ public class MinioService : IMinioService
             await _minioClient.StatObjectAsync(statObjectArgs, cancellationToken);
             return true;
         }
-        catch
+        catch (Minio.Exceptions.ObjectNotFoundException)
         {
             return false;
         }
@@ -232,103 +207,70 @@ public class MinioService : IMinioService
     /// </summary>
     public async Task<bool> CreateFolderAsync(string folderPath, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await EnsureBucketExistsAsync(cancellationToken);
+        await EnsureBucketExistsAsync(cancellationToken);
 
-            // 规范化路径：确保以 / 结尾
-            var folderKey = folderPath.TrimEnd('/') + "/";
-            
-            // 创建占位对象（空内容）
-            var putObjectArgs = new PutObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(folderKey)
-                .WithStreamData(new MemoryStream())
-                .WithObjectSize(0)
-                .WithContentType("application/x-directory");
+        // 规范化路径：确保以 / 结尾
+        var folderKey = folderPath.TrimEnd('/') + "/";
+        
+        // 创建占位对象（空内容）
+        var putObjectArgs = new PutObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(folderKey)
+            .WithStreamData(new MemoryStream())
+            .WithObjectSize(0)
+            .WithContentType("application/x-directory");
 
-            await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
-            _logger.LogInformation("Folder placeholder created: {FolderPath}", folderPath);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create folder: {FolderPath}", folderPath);
-            return false;
-        }
+        await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
+        _logger.LogInformation("Folder placeholder created: {FolderPath}", folderPath);
+        return true;
     }
 
-    public async Task<UploadResult> UploadFileWithPathAsync(IFormFile file, string fullPath, CancellationToken cancellationToken = default)
+    public async Task<string> UploadFileWithPathAsync(IFormFile file, string fullPath, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            await EnsureBucketExistsAsync(cancellationToken);
+        await EnsureBucketExistsAsync(cancellationToken);
 
-            using var stream = file.OpenReadStream();
-            
-            var putObjectArgs = new PutObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(fullPath)
-                .WithStreamData(stream)
-                .WithObjectSize(file.Length)
-                .WithContentType(file.ContentType);
+        using var stream = file.OpenReadStream();
+        
+        var putObjectArgs = new PutObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(fullPath)
+            .WithStreamData(stream)
+            .WithObjectSize(file.Length)
+            .WithContentType(file.ContentType);
 
-            await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
+        await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
 
-            _logger.LogInformation("File uploaded successfully: {FullPath}", fullPath);
+        _logger.LogInformation("File uploaded successfully: {FullPath}", fullPath);
 
-            return new UploadResult
-            {
-                Success = true,
-                ObjectName = fullPath,
-                Message = "文件上传成功"
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to upload file: {FullPath}", fullPath);
-            return new UploadResult
-            {
-                Success = false,
-                Message = $"文件上传失败: {ex.Message}"
-            };
-        }
+        return fullPath;
     }
 
     public async Task<bool> DeleteFolderAsync(string folderPath, CancellationToken cancellationToken = default)
     {
-        try
+        // 获取文件夹下的所有对象
+        var prefix = folderPath.TrimEnd('/') + "/";
+        var listObjectsArgs = new ListObjectsArgs()
+            .WithBucket(_bucketName)
+            .WithPrefix(prefix)
+            .WithRecursive(true);
+
+        var objectsToDelete = new List<string>();
+        await foreach (var item in _minioClient.ListObjectsEnumAsync(listObjectsArgs, cancellationToken))
         {
-            // 获取文件夹下的所有对象
-            var prefix = folderPath.TrimEnd('/') + "/";
-            var listObjectsArgs = new ListObjectsArgs()
+            objectsToDelete.Add(item.Key);
+        }
+
+        // 批量删除对象
+        foreach (var objKey in objectsToDelete)
+        {
+            var removeObjectArgs = new RemoveObjectArgs()
                 .WithBucket(_bucketName)
-                .WithPrefix(prefix)
-                .WithRecursive(true);
-
-            var objectsToDelete = new List<string>();
-            await foreach (var item in _minioClient.ListObjectsEnumAsync(listObjectsArgs, cancellationToken))
-            {
-                objectsToDelete.Add(item.Key);
-            }
-
-            // 批量删除对象
-            foreach (var objKey in objectsToDelete)
-            {
-                var removeObjectArgs = new RemoveObjectArgs()
-                    .WithBucket(_bucketName)
-                    .WithObject(objKey);
-                await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
-            }
-
-            _logger.LogInformation("Folder deleted successfully: {FolderPath}, deleted {Count} objects", folderPath, objectsToDelete.Count);
-            return true;
+                .WithObject(objKey);
+            await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete folder: {FolderPath}", folderPath);
-            return false;
-        }
+
+        _logger.LogInformation("Folder deleted successfully: {FolderPath}, deleted {Count} objects", folderPath, objectsToDelete.Count);
+        return true;
     }
 
     public async Task<List<string>> ListFoldersAsync(string? parentFolder = null, CancellationToken cancellationToken = default)
@@ -424,34 +366,26 @@ public class MinioService : IMinioService
 
     public async Task<bool> MoveFileAsync(string sourceObjectName, string destinationObjectName, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            // 复制对象
-            var copySourceArgs = new CopySourceObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(sourceObjectName);
+        // 复制对象
+        var copySourceArgs = new CopySourceObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(sourceObjectName);
 
-            var copyObjectArgs = new CopyObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(destinationObjectName)
-                .WithCopyObjectSource(copySourceArgs);
+        var copyObjectArgs = new CopyObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(destinationObjectName)
+            .WithCopyObjectSource(copySourceArgs);
 
-            await _minioClient.CopyObjectAsync(copyObjectArgs, cancellationToken);
+        await _minioClient.CopyObjectAsync(copyObjectArgs, cancellationToken);
 
-            // 删除原对象
-            var removeObjectArgs = new RemoveObjectArgs()
-                .WithBucket(_bucketName)
-                .WithObject(sourceObjectName);
-            await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
+        // 删除原对象
+        var removeObjectArgs = new RemoveObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(sourceObjectName);
+        await _minioClient.RemoveObjectAsync(removeObjectArgs, cancellationToken);
 
-            _logger.LogInformation("File moved from {Source} to {Destination}", sourceObjectName, destinationObjectName);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to move file from {Source} to {Destination}", sourceObjectName, destinationObjectName);
-            return false;
-        }
+        _logger.LogInformation("File moved from {Source} to {Destination}", sourceObjectName, destinationObjectName);
+        return true;
     }
 
     #endregion
@@ -460,64 +394,33 @@ public class MinioService : IMinioService
 
     public async Task<bool> CreateBucketAsync(string bucketName, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var makeBucketArgs = new MakeBucketArgs()
-                .WithBucket(bucketName);
-            await _minioClient.MakeBucketAsync(makeBucketArgs, cancellationToken);
-            _logger.LogInformation("Bucket created: {BucketName}", bucketName);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to create bucket: {BucketName}", bucketName);
-            return false;
-        }
+        var makeBucketArgs = new MakeBucketArgs()
+            .WithBucket(bucketName);
+        await _minioClient.MakeBucketAsync(makeBucketArgs, cancellationToken);
+        _logger.LogInformation("Bucket created: {BucketName}", bucketName);
+        return true;
     }
 
     public async Task<bool> DeleteBucketAsync(string bucketName, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var removeBucketArgs = new RemoveBucketArgs()
-                .WithBucket(bucketName);
-            await _minioClient.RemoveBucketAsync(removeBucketArgs, cancellationToken);
-            _logger.LogInformation("Bucket deleted: {BucketName}", bucketName);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete bucket: {BucketName}", bucketName);
-            return false;
-        }
+        var removeBucketArgs = new RemoveBucketArgs()
+            .WithBucket(bucketName);
+        await _minioClient.RemoveBucketAsync(removeBucketArgs, cancellationToken);
+        _logger.LogInformation("Bucket deleted: {BucketName}", bucketName);
+        return true;
     }
 
     public async Task<bool> BucketExistsAsync(string bucketName, CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var bucketExistsArgs = new BucketExistsArgs()
-                .WithBucket(bucketName);
-            return await _minioClient.BucketExistsAsync(bucketExistsArgs, cancellationToken);
-        }
-        catch
-        {
-            return false;
-        }
+        var bucketExistsArgs = new BucketExistsArgs()
+            .WithBucket(bucketName);
+        return await _minioClient.BucketExistsAsync(bucketExistsArgs, cancellationToken);
     }
 
     public async Task<List<string>> ListBucketsAsync(CancellationToken cancellationToken = default)
     {
-        try
-        {
-            var bucketsResult = await _minioClient.ListBucketsAsync(cancellationToken);
-            return bucketsResult.Buckets.Select(b => b.Name).ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to list buckets");
-            return new List<string>();
-        }
+        var bucketsResult = await _minioClient.ListBucketsAsync(cancellationToken);
+        return bucketsResult.Buckets.Select(b => b.Name).ToList();
     }
 
     public Task<bool> SetCurrentBucketAsync(string bucketName)
