@@ -112,6 +112,9 @@ builder.Services.AddScoped<IFileVersionService, FileVersionService>();
 // Add Chunked Upload Service（分片上传服务）
 builder.Services.AddScoped<IChunkedUploadService, ChunkedUploadService>();
 
+// Add Chunked Download Service（分片下载服务 - 服务端代理）
+builder.Services.AddScoped<IChunkedDownloadService, ChunkedDownloadService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

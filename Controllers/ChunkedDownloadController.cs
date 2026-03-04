@@ -8,7 +8,7 @@ using System.ComponentModel.DataAnnotations;
 namespace MinIOStorageService.Controllers;
 
 /// <summary>
-/// 分片下载控制器 - 支持断点续传（HTTP Range + 预签名URL）
+/// 分片下载控制器 - 支持断点续传（HTTP Range + 预签名URL + 服务端代理）
 /// </summary>
 [ApiController]
 [Route("api/download")]
@@ -16,15 +16,18 @@ public class ChunkedDownloadController : ControllerBase
 {
     private readonly FileDbContext _dbContext;
     private readonly IStorageProvider _storageProvider;
+    private readonly IChunkedDownloadService _downloadService;
     private readonly ILogger<ChunkedDownloadController> _logger;
 
     public ChunkedDownloadController(
         FileDbContext dbContext,
         IStorageProvider storageProvider,
+        IChunkedDownloadService downloadService,
         ILogger<ChunkedDownloadController> logger)
     {
         _dbContext = dbContext;
         _storageProvider = storageProvider;
+        _downloadService = downloadService;
         _logger = logger;
     }
 
@@ -249,6 +252,267 @@ public class ChunkedDownloadController : ControllerBase
         }
     }
 
+    #region 服务端代理流方案（方案3）
+
+    /// <summary>
+    /// 创建下载任务（服务端代理流方案）
+    /// </summary>
+    [HttpPost("tasks")]
+    public async Task<IActionResult> CreateDownloadTask(
+        [FromBody] CreateDownloadTaskRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var clientId = request.ClientId ?? HttpContext.Connection.Id ?? Guid.NewGuid().ToString();
+            
+            var task = await _downloadService.CreateDownloadTaskAsync(
+                request.FileVersionId, 
+                clientId, 
+                cancellationToken);
+
+            return Ok(new
+            {
+                message = "下载任务创建成功",
+                taskId = task.Id,
+                fileVersionId = task.FileVersionId,
+                fileSize = task.FileSize,
+                status = task.Status.ToString(),
+                expiresAt = task.ExpiresAt
+            });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return NotFound(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "创建下载任务失败");
+            return StatusCode(500, new { message = "创建下载任务失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 获取下载任务状态（用于断点续传）
+    /// </summary>
+    [HttpGet("tasks/{taskId}/status")]
+    public async Task<IActionResult> GetDownloadTaskStatus(Guid taskId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var status = await _downloadService.GetDownloadStatusAsync(taskId, cancellationToken);
+
+            return Ok(new
+            {
+                taskId = status.TaskId,
+                fileVersionId = status.FileVersionId,
+                fileName = status.FileName,
+                fileSize = status.FileSize,
+                downloadedBytes = status.DownloadedBytes,
+                progressPercent = Math.Round(status.ProgressPercent, 2),
+                state = status.State.ToString(),
+                createdAt = status.CreatedAt,
+                expiresAt = status.ExpiresAt,
+                completedAt = status.CompletedAt
+            });
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { message = "下载任务不存在", taskId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取下载任务状态失败: {TaskId}", taskId);
+            return StatusCode(500, new { message = "获取下载任务状态失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 获取分片下载计划（服务端代理方案）
+    /// </summary>
+    [HttpGet("tasks/{taskId}/chunks")]
+    public async Task<IActionResult> GetProxyChunkPlan(
+        Guid taskId,
+        [FromQuery] long chunkSize = 5 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var plan = await _downloadService.GetChunkDownloadPlanAsync(taskId, chunkSize, null, cancellationToken);
+
+            return Ok(new
+            {
+                taskId = plan.TaskId,
+                fileName = plan.FileName,
+                fileSize = plan.FileSize,
+                chunkSize = plan.ChunkSize,
+                totalChunks = plan.TotalChunks,
+                chunks = plan.Chunks.Select(c => new
+                {
+                    index = c.Index,
+                    start = c.Start,
+                    end = c.End,
+                    size = c.Size,
+                    url = c.Url  // 服务端代理URL
+                })
+            });
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { message = "下载任务不存在", taskId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "获取分片下载计划失败: {TaskId}", taskId);
+            return StatusCode(500, new { message = "获取分片下载计划失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 下载指定分片（服务端代理流）
+    /// </summary>
+    [HttpGet("proxy/{taskId}/chunks/{chunkIndex}")]
+    public async Task<IActionResult> DownloadProxyChunk(
+        Guid taskId,
+        int chunkIndex,
+        [FromQuery] long chunkSize = 5 * 1024 * 1024,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var (stream, chunk) = await ((ChunkedDownloadService)_downloadService).DownloadChunkAsync(
+                taskId, chunkIndex, chunkSize, cancellationToken);
+
+            var fileName = $"chunk_{chunkIndex}";
+            
+            Response.Headers.Append("X-Chunk-Index", chunkIndex.ToString());
+            Response.Headers.Append("X-Chunk-Start", chunk.Start.ToString());
+            Response.Headers.Append("X-Chunk-End", chunk.End.ToString());
+            Response.Headers.Append("X-Chunk-Size", chunk.Size.ToString());
+
+            return File(stream, "application/octet-stream", fileName);
+        }
+        catch (FileNotFoundException)
+        {
+            return NotFound(new { message = "下载任务不存在", taskId });
+        }
+        catch (ArgumentOutOfRangeException ex)
+        {
+            return BadRequest(new { message = ex.Message, taskId, chunkIndex });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message, taskId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "下载分片失败: {TaskId}, Chunk: {ChunkIndex}", taskId, chunkIndex);
+            return StatusCode(500, new { message = "下载分片失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 更新下载进度
+    /// </summary>
+    [HttpPost("tasks/{taskId}/progress")]
+    public async Task<IActionResult> UpdateProgress(
+        Guid taskId,
+        [FromBody] UpdateProgressRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _downloadService.UpdateProgressAsync(taskId, request.DownloadedBytes, cancellationToken);
+
+            return Ok(new
+            {
+                message = "进度更新成功",
+                taskId,
+                downloadedBytes = request.DownloadedBytes
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "更新下载进度失败: {TaskId}", taskId);
+            return StatusCode(500, new { message = "更新下载进度失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 完成下载任务
+    /// </summary>
+    [HttpPost("tasks/{taskId}/complete")]
+    public async Task<IActionResult> CompleteDownload(Guid taskId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _downloadService.CompleteDownloadAsync(taskId, cancellationToken);
+
+            return Ok(new
+            {
+                message = "下载任务已完成",
+                taskId
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "完成下载任务失败: {TaskId}", taskId);
+            return StatusCode(500, new { message = "完成下载任务失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 取消下载任务
+    /// </summary>
+    [HttpDelete("tasks/{taskId}")]
+    public async Task<IActionResult> CancelDownload(Guid taskId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await _downloadService.CancelDownloadAsync(taskId, cancellationToken);
+
+            return Ok(new
+            {
+                message = "下载任务已取消",
+                taskId
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message, taskId });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "取消下载任务失败: {TaskId}", taskId);
+            return StatusCode(500, new { message = "取消下载任务失败", error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// 清理过期的下载任务
+    /// </summary>
+    [HttpPost("tasks/cleanup")]
+    public async Task<IActionResult> CleanupExpiredTasks(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var count = await _downloadService.CleanupExpiredTasksAsync(cancellationToken);
+
+            return Ok(new
+            {
+                message = "过期任务清理完成",
+                cleanedCount = count
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "清理过期任务失败");
+            return StatusCode(500, new { message = "清理过期任务失败", error = ex.Message });
+        }
+    }
+
+    #endregion
+
     #region 私有辅助方法
 
     private (long Start, long End, bool IsRangeRequest) ParseRangeHeader(string? rangeHeader, long fileSize)
@@ -295,3 +559,24 @@ public class ChunkedDownloadController : ControllerBase
 
     #endregion
 }
+
+#region 请求模型
+
+public class CreateDownloadTaskRequest
+{
+    [Required]
+    public Guid FileVersionId { get; set; }
+    
+    /// <summary>
+    /// 客户端标识（可选，默认使用连接ID）
+    /// </summary>
+    public string? ClientId { get; set; }
+}
+
+public class UpdateProgressRequest
+{
+    [Required]
+    public long DownloadedBytes { get; set; }
+}
+
+#endregion

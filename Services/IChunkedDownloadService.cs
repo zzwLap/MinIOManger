@@ -22,7 +22,7 @@ public interface IChunkedDownloadService
     /// <param name="taskId">任务ID</param>
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>下载任务状态</returns>
-    Task<DownloadTaskStatus> GetDownloadStatusAsync(Guid taskId, CancellationToken cancellationToken = default);
+    Task<DownloadTaskInfo> GetDownloadStatusAsync(Guid taskId, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// 下载指定范围的数据（HTTP Range方案）
@@ -83,9 +83,9 @@ public interface IChunkedDownloadService
 }
 
 /// <summary>
-/// 下载任务状态
+/// 下载任务信息
 /// </summary>
-public class DownloadTaskStatus
+public class DownloadTaskInfo
 {
     public Guid TaskId { get; set; }
     public Guid FileVersionId { get; set; }
