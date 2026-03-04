@@ -11,6 +11,17 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 
+// Add CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowAll", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
 // Add Swagger with multiple API groups
 builder.Services.AddSwaggerGen(c =>
 {
@@ -139,8 +150,12 @@ if (app.Environment.IsDevelopment())
         c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
     });
 }
-
+//由于这个把http转成https,触发同源策略
 app.UseHttpsRedirection();
+
+// Use CORS before other middleware
+app.UseCors("AllowAll");
+
 app.UseAuthorization();
 app.MapControllers();
 

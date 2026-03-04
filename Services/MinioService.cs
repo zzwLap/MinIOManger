@@ -24,14 +24,14 @@ public class MinioService : IMinioService
         await EnsureBucketExistsAsync(cancellationToken);
 
         var fileName = objectName ?? $"{Guid.NewGuid()}_{file.FileName}";
-        
+
         // 构建完整路径（包含文件夹）
-        var fullPath = string.IsNullOrEmpty(folder) 
-            ? fileName 
+        var fullPath = string.IsNullOrEmpty(folder)
+            ? fileName
             : $"{folder.TrimEnd('/')}/{fileName}";
-        
+
         using var stream = file.OpenReadStream();
-        
+
         var putObjectArgs = new PutObjectArgs()
             .WithBucket(_bucketName)
             .WithObject(fullPath)
@@ -39,7 +39,7 @@ public class MinioService : IMinioService
             .WithObjectSize(file.Length)
             .WithContentType(file.ContentType);
 
-        await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
+        var res = await _minioClient.PutObjectAsync(putObjectArgs, cancellationToken);
 
         _logger.LogInformation("File uploaded successfully: {FullPath}", fullPath);
 
@@ -49,7 +49,7 @@ public class MinioService : IMinioService
     public async Task<Stream> DownloadFileAsync(string objectName, CancellationToken cancellationToken = default)
     {
         var memoryStream = new MemoryStream();
-        
+
         var getObjectArgs = new GetObjectArgs()
             .WithBucket(_bucketName)
             .WithObject(objectName)
@@ -104,12 +104,12 @@ public class MinioService : IMinioService
     public async Task<List<FileMetadata>> ListFilesAsync(string? prefix = null, CancellationToken cancellationToken = default)
     {
         var files = new List<FileMetadata>();
-        
+
         var listObjectsArgs = new ListObjectsArgs()
             .WithBucket(_bucketName)
             .WithPrefix(prefix ?? "")
             .WithRecursive(true);
-            
+
         await foreach (var item in _minioClient.ListObjectsEnumAsync(listObjectsArgs, cancellationToken))
         {
             if (!item.IsDir)
@@ -147,13 +147,13 @@ public class MinioService : IMinioService
     public async Task<Stream> CreateBatchDownloadZipAsync(IEnumerable<string> objectNames, string zipFileName, CancellationToken cancellationToken = default)
     {
         var memoryStream = new MemoryStream();
-        
+
         using (var zipArchive = new ZipArchive(memoryStream, ZipArchiveMode.Create, true))
         {
             foreach (var objectName in objectNames)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                
+
                 if (!await FileExistsAsync(objectName, cancellationToken))
                 {
                     _logger.LogWarning("File not found for batch download: {ObjectName}", objectName);
@@ -164,13 +164,13 @@ public class MinioService : IMinioService
                 {
                     var fileStream = await DownloadFileAsync(objectName, cancellationToken);
                     var entryName = Path.GetFileName(objectName);
-                    
+
                     var entry = zipArchive.CreateEntry(entryName, CompressionLevel.Optimal);
                     await using (var entryStream = entry.Open())
                     {
                         await fileStream.CopyToAsync(entryStream, cancellationToken);
                     }
-                    
+
                     _logger.LogDebug("Added to zip: {ObjectName}", objectName);
                 }
                 catch (Exception ex)
@@ -189,7 +189,7 @@ public class MinioService : IMinioService
         var bucketExistsArgs = new BucketExistsArgs()
             .WithBucket(_bucketName);
         var exists = await _minioClient.BucketExistsAsync(bucketExistsArgs, cancellationToken);
-        
+
         if (!exists)
         {
             var makeBucketArgs = new MakeBucketArgs()
@@ -211,7 +211,7 @@ public class MinioService : IMinioService
 
         // 规范化路径：确保以 / 结尾
         var folderKey = folderPath.TrimEnd('/') + "/";
-        
+
         // 创建占位对象（空内容）
         var putObjectArgs = new PutObjectArgs()
             .WithBucket(_bucketName)
@@ -230,7 +230,7 @@ public class MinioService : IMinioService
         await EnsureBucketExistsAsync(cancellationToken);
 
         using var stream = file.OpenReadStream();
-        
+
         var putObjectArgs = new PutObjectArgs()
             .WithBucket(_bucketName)
             .WithObject(fullPath)
@@ -277,7 +277,7 @@ public class MinioService : IMinioService
     {
         var folders = new HashSet<string>();
         var prefix = parentFolder != null ? parentFolder.TrimEnd('/') + "/" : "";
-        
+
         var listObjectsArgs = new ListObjectsArgs()
             .WithBucket(_bucketName)
             .WithPrefix(prefix)
@@ -314,7 +314,7 @@ public class MinioService : IMinioService
     {
         var prefix = folderPath.TrimEnd('/') + "/";
         var files = new List<FileMetadata>();
-        
+
         var listObjectsArgs = new ListObjectsArgs()
             .WithBucket(_bucketName)
             .WithPrefix(prefix)
@@ -340,7 +340,7 @@ public class MinioService : IMinioService
     public async Task<List<FileMetadata>> ListFilesRecursiveAsync(string? prefix = null, CancellationToken cancellationToken = default)
     {
         var files = new List<FileMetadata>();
-        
+
         var listObjectsArgs = new ListObjectsArgs()
             .WithBucket(_bucketName)
             .WithPrefix(prefix ?? "")
