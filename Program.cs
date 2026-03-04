@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Minio;
 using MinIOStorageService.Data;
+using MinIOStorageService.Hubs;
 using MinIOStorageService.Models;
 using MinIOStorageService.Services;
 
@@ -37,7 +38,7 @@ builder.Services.AddSwaggerGen(c =>
         return docName.ToLower() switch
         {
             "minio" => controllerName is "files" or "buckets" or "folders",
-            "filecache" => controllerName is "filecache" or "fileversions" or "chunkedupload" or "chunkeddownload",
+            "filecache" => controllerName is "filecache" or "fileversions" or "chunkedupload" or "chunkeddownload" or "p2pdownload",
             _ => false
         };
     });
@@ -115,6 +116,12 @@ builder.Services.AddScoped<IChunkedUploadService, ChunkedUploadService>();
 // Add Chunked Download Service（分片下载服务 - 服务端代理）
 builder.Services.AddScoped<IChunkedDownloadService, ChunkedDownloadService>();
 
+// Add P2P Download Service（P2P分片下载服务）
+builder.Services.AddScoped<IP2PDownloadService, P2PDownloadService>();
+
+// Add SignalR for P2P real-time communication
+builder.Services.AddSignalR();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -136,6 +143,9 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 app.UseAuthorization();
 app.MapControllers();
+
+// Map SignalR hubs
+app.MapHub<P2PTrackerHub>("/p2phub");
 
 // 自动创建数据库
 using (var scope = app.Services.CreateScope())
