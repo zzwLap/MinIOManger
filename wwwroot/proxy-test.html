@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>服务器代理分片下载测试客户端</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            border-bottom: 2px solid #28a745;
+            padding-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        .section h2 {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input[type="text"]:focus, input[type="number"]:focus, select:focus {
+            outline: none;
+            border-color: #28a745;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #1e7e34;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .btn-warning {
+            background: #ffc107;
+            color: #212529;
+        }
+        .btn-warning:hover {
+            background: #e0a800;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .status.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        .log-container {
+            background: #212529;
+            color: #fff;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 3px 0;
+            border-bottom: 1px solid #333;
+        }
+        .log-time {
+            color: #6c757d;
+            margin-right: 10px;
+        }
+        .log-info { color: #17a2b8; }
+        .log-success { color: #28a745; }
+        .log-error { color: #dc3545; }
+        .log-warn { color: #ffc107; }
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e9ecef;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-top: 15px;
+            position: relative;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #28a745, #1e7e34);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 14px;
+            font-weight: bold;
+        }
+        .chunk-list {
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        .chunk-item {
+            padding: 10px;
+            border-bottom: 1px solid #dee2e6;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chunk-item:last-child {
+            border-bottom: none;
+        }
+        .chunk-item.pending { background: #f8f9fa; }
+        .chunk-item.downloading { background: #fff3cd; }
+        .chunk-item.completed { background: #d4edda; }
+        .chunk-item.failed { background: #f8d7da; }
+        .chunk-index {
+            font-weight: bold;
+            color: #495057;
+            min-width: 60px;
+        }
+        .chunk-range {
+            color: #6c757d;
+            font-size: 13px;
+            flex: 1;
+            text-align: center;
+        }
+        .chunk-status {
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .chunk-status.pending { background: #6c757d; color: white; }
+        .chunk-status.downloading { background: #ffc107; color: #212529; }
+        .chunk-status.completed { background: #28a745; color: white; }
+        .chunk-status.failed { background: #dc3545; color: white; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #28a745;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .download-mode {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .mode-card {
+            flex: 1;
+            padding: 20px;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+        .mode-card:hover {
+            border-color: #28a745;
+        }
+        .mode-card.active {
+            border-color: #28a745;
+            background: #f8fff8;
+        }
+        .mode-card h3 {
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .mode-card p {
+            font-size: 13px;
+            color: #666;
+        }
+        .file-info {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 15px;
+        }
+        .file-info h4 {
+            margin-bottom: 10px;
+            color: #2e7d32;
+        }
+        .file-info p {
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        .speed-chart {
+            height: 150px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            margin-top: 15px;
+            position: relative;
+            overflow: hidden;
+        }
+        .speed-bar {
+            position: absolute;
+            bottom: 0;
+            width: 2px;
+            background: #28a745;
+            transition: height 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🌐 服务器代理分片下载测试客户端</h1>
+        <p class="subtitle">测试服务端代理流分片下载功能（断点续传）</p>
+
+        <!-- 服务器配置 -->
+        <div class="section">
+            <h2>🔧 服务器配置</h2>
+            <div class="form-group">
+                <label>API 服务器地址</label>
+                <input type="text" id="serverUrl" value="http://localhost:5000" placeholder="http://localhost:5000">
+            </div>
+        </div>
+
+        <!-- 下载模式选择 -->
+        <div class="section">
+            <h2>📥 下载模式</h2>
+            <div class="download-mode">
+                <div class="mode-card active" onclick="selectMode('range')" id="modeRange">
+                    <h3>HTTP Range</h3>
+                    <p>使用 HTTP Range 请求头进行断点续传下载</p>
+                </div>
+                <div class="mode-card" onclick="selectMode('proxy')" id="modeProxy">
+                    <h3>服务端代理</h3>
+                    <p>使用服务端代理流进行分片下载</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 文件信息 -->
+        <div class="section">
+            <h2>📄 文件信息</h2>
+            <div class="form-group">
+                <label>文件版本 ID</label>
+                <input type="text" id="versionId" placeholder="输入文件版本 GUID">
+            </div>
+            <button class="btn btn-primary" onclick="getFileInfo()">获取文件信息</button>
+            <button class="btn btn-secondary" onclick="createDownloadTask()">创建下载任务</button>
+            <div id="fileInfo" class="file-info" style="display: none;">
+                <h4>文件详情</h4>
+                <p><strong>文件名:</strong> <span id="fileName">-</span></p>
+                <p><strong>文件大小:</strong> <span id="fileSize">-</span></p>
+                <p><strong>内容类型:</strong> <span id="contentType">-</span></p>
+                <p><strong>支持断点续传:</strong> <span id="acceptRanges">-</span></p>
+            </div>
+        </div>
+
+        <!-- 下载任务 -->
+        <div class="section">
+            <h2>📋 下载任务</h2>
+            <div class="form-group">
+                <label>下载任务 ID</label>
+                <input type="text" id="taskId" placeholder="创建任务后自动生成">
+            </div>
+            <div class="form-group">
+                <label>分片大小 (MB)</label>
+                <input type="number" id="chunkSize" value="5" min="1" max="50">
+            </div>
+            <div class="form-group">
+                <label>并发数</label>
+                <input type="number" id="concurrency" value="3" min="1" max="10">
+            </div>
+            <button class="btn btn-primary" onclick="getChunkPlan()">获取分片计划</button>
+            <button class="btn btn-success" onclick="startDownload()">开始下载</button>
+            <button class="btn btn-warning" onclick="pauseDownload()">暂停</button>
+            <button class="btn btn-danger" onclick="cancelDownload()">取消</button>
+            <button class="btn btn-secondary" onclick="getTaskStatus()">获取任务状态</button>
+            <div id="taskStatus" class="status info" style="display: none;"></div>
+        </div>
+
+        <!-- 下载进度 -->
+        <div class="section">
+            <h2>📊 下载进度</h2>
+            <div class="progress-bar">
+                <div class="progress-fill" id="progressFill" style="width: 0%">0%</div>
+            </div>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="statTotalChunks">0</div>
+                    <div class="stat-label">总分片</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statCompleted">0</div>
+                    <div class="stat-label">已完成</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statFailed">0</div>
+                    <div class="stat-label">失败</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statSpeed">0</div>
+                    <div class="stat-label">速度 (KB/s)</div>
+                </div>
+            </div>
+            <div class="speed-chart" id="speedChart"></div>
+        </div>
+
+        <!-- 分片列表 -->
+        <div class="section">
+            <h2>🧩 分片状态</h2>
+            <div class="chunk-list" id="chunkList">
+                <div style="padding: 20px; text-align: center; color: #666;">
+                    暂无分片信息，请先获取分片计划
+                </div>
+            </div>
+        </div>
+
+        <!-- 日志输出 -->
+        <div class="section">
+            <h2>📝 操作日志</h2>
+            <button class="btn btn-secondary" onclick="clearLogs()">清空日志</button>
+            <div class="log-container" id="logContainer">
+                <div class="log-entry">
+                    <span class="log-time">[系统]</span>
+                    <span class="log-info">服务器代理下载测试客户端已加载</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let currentMode = 'range';
+        let downloadTask = null;
+        let chunks = [];
+        let isDownloading = false;
+        let isPaused = false;
+        let downloadedBytes = 0;
+        let startTime = null;
+        let speedHistory = [];
+
+        // 日志记录
+        function log(message, type = 'info') {
+            const container = document.getElementById('logContainer');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">[${time}]</span>
+                <span class="log-${type}">${message}</span>
+            `;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+            log('日志已清空', 'info');
+        }
+
+        // 显示状态
+        function showStatus(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `status ${type}`;
+            element.style.display = 'block';
+        }
+
+        // 选择下载模式
+        function selectMode(mode) {
+            currentMode = mode;
+            document.querySelectorAll('.mode-card').forEach(card => card.classList.remove('active'));
+            document.getElementById(`mode${mode.charAt(0).toUpperCase() + mode.slice(1)}`).classList.add('active');
+            log(`切换到 ${mode === 'range' ? 'HTTP Range' : '服务端代理'} 模式`, 'info');
+        }
+
+        // 格式化文件大小
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 获取文件信息
+        async function getFileInfo() {
+            const versionId = document.getElementById('versionId').value;
+            if (!versionId) {
+                log('请输入文件版本 ID', 'error');
+                return;
+            }
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                const response = await fetch(`${serverUrl}/api/download/${versionId}/info`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('fileName').textContent = data.fileName;
+                    document.getElementById('fileSize').textContent = formatSize(data.fileSize);
+                    document.getElementById('contentType').textContent = data.contentType;
+                    document.getElementById('acceptRanges').textContent = data.acceptRanges;
+                    document.getElementById('fileInfo').style.display = 'block';
+                    log(`获取文件信息成功: ${data.fileName} (${formatSize(data.fileSize)})`, 'success');
+                } else {
+                    log(`获取文件信息失败: ${data.message}`, 'error');
+                }
+            } catch (err) {
+                log(`获取文件信息错误: ${err.message}`, 'error');
+            }
+        }
+
+        // 创建下载任务
+        async function createDownloadTask() {
+            const versionId = document.getElementById('versionId').value;
+            if (!versionId) {
+                log('请输入文件版本 ID', 'error');
+                return;
+            }
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                const response = await fetch(`${serverUrl}/api/download/tasks`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fileVersionId: versionId,
+                        clientId: 'proxy-test-client-' + Date.now()
+                    })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    document.getElementById('taskId').value = data.taskId;
+                    downloadTask = data;
+                    log(`下载任务创建成功: ${data.taskId}`, 'success');
+                    showStatus('taskStatus', `任务创建成功，文件大小: ${formatSize(data.fileSize)}`, 'success');
+                } else {
+                    log(`创建任务失败: ${data.message}`, 'error');
+                }
+            } catch (err) {
+                log(`创建任务错误: ${err.message}`, 'error');
+            }
+        }
+
+        // 获取分片计划
+        async function getChunkPlan() {
+            const taskId = document.getElementById('taskId').value;
+            if (!taskId) {
+                log('请先创建下载任务', 'error');
+                return;
+            }
+
+            const chunkSize = parseInt(document.getElementById('chunkSize').value) * 1024 * 1024;
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                let url;
+                
+                if (currentMode === 'range') {
+                    // HTTP Range 模式：获取预签名URL列表
+                    const versionId = document.getElementById('versionId').value;
+                    url = `${serverUrl}/api/download/${versionId}/chunks?chunkSize=${chunkSize}`;
+                } else {
+                    // 服务端代理模式
+                    url = `${serverUrl}/api/download/tasks/${taskId}/chunks?chunkSize=${chunkSize}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (response.ok) {
+                    chunks = data.chunks.map((chunk, index) => ({
+                        index: chunk.index,
+                        start: chunk.start,
+                        end: chunk.end,
+                        size: chunk.size,
+                        url: chunk.url,
+                        status: 'pending'
+                    }));
+                    
+                    displayChunkList();
+                    document.getElementById('statTotalChunks').textContent = chunks.length;
+                    log(`获取分片计划成功: ${chunks.length} 个分片`, 'success');
+                } else {
+                    log(`获取分片计划失败: ${data.message}`, 'error');
+                }
+            } catch (err) {
+                log(`获取分片计划错误: ${err.message}`, 'error');
+            }
+        }
+
+        // 显示分片列表
+        function displayChunkList() {
+            const container = document.getElementById('chunkList');
+            container.innerHTML = chunks.map(chunk => `
+                <div class="chunk-item ${chunk.status}" id="chunk-${chunk.index}">
+                    <span class="chunk-index">#${chunk.index}</span>
+                    <span class="chunk-range">${formatSize(chunk.start)} - ${formatSize(chunk.end)} (${formatSize(chunk.size)})</span>
+                    <span class="chunk-status ${chunk.status}">${getStatusText(chunk.status)}</span>
+                </div>
+            `).join('');
+        }
+
+        function getStatusText(status) {
+            const map = { pending: '等待中', downloading: '下载中', completed: '已完成', failed: '失败' };
+            return map[status] || status;
+        }
+
+        // 更新分片状态
+        function updateChunkStatus(index, status) {
+            chunks[index].status = status;
+            const element = document.getElementById(`chunk-${index}`);
+            if (element) {
+                element.className = `chunk-item ${status}`;
+                element.querySelector('.chunk-status').className = `chunk-status ${status}`;
+                element.querySelector('.chunk-status').textContent = getStatusText(status);
+            }
+        }
+
+        // 开始下载
+        async function startDownload() {
+            if (chunks.length === 0) {
+                log('请先获取分片计划', 'error');
+                return;
+            }
+
+            isDownloading = true;
+            isPaused = false;
+            startTime = Date.now();
+            downloadedBytes = 0;
+            speedHistory = [];
+
+            log(`开始下载，模式: ${currentMode === 'range' ? 'HTTP Range' : '服务端代理'}`, 'success');
+
+            const concurrency = parseInt(document.getElementById('concurrency').value);
+            const pendingChunks = chunks.filter(c => c.status === 'pending');
+
+            // 使用并发控制
+            const queue = [...pendingChunks];
+            const executing = [];
+
+            while (queue.length > 0 || executing.length > 0) {
+                if (isPaused) {
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    continue;
+                }
+
+                // 填充并发槽
+                while (executing.length < concurrency && queue.length > 0) {
+                    const chunk = queue.shift();
+                    const promise = downloadChunk(chunk).finally(() => {
+                        const index = executing.indexOf(promise);
+                        if (index > -1) executing.splice(index, 1);
+                    });
+                    executing.push(promise);
+                }
+
+                if (executing.length > 0) {
+                    await Promise.race(executing);
+                }
+            }
+
+            isDownloading = false;
+            const completed = chunks.filter(c => c.status === 'completed').length;
+            log(`下载完成: ${completed}/${chunks.length} 个分片`, completed === chunks.length ? 'success' : 'warn');
+        }
+
+        // 下载单个分片
+        async function downloadChunk(chunk) {
+            updateChunkStatus(chunk.index, 'downloading');
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                let url = chunk.url;
+                
+                // 如果是相对路径，拼接完整URL
+                if (url.startsWith('/')) {
+                    url = serverUrl + url;
+                }
+
+                const headers = {};
+                if (currentMode === 'range') {
+                    headers['Range'] = `bytes=${chunk.start}-${chunk.end}`;
+                }
+
+                const startTime = Date.now();
+                const response = await fetch(url, { headers });
+                
+                if (response.ok || response.status === 206) {
+                    const blob = await response.blob();
+                    downloadedBytes += blob.size;
+                    
+                    // 计算速度
+                    const duration = (Date.now() - startTime) / 1000;
+                    const speed = blob.size / duration / 1024; // KB/s
+                    updateSpeed(speed);
+
+                    updateChunkStatus(chunk.index, 'completed');
+                    updateProgress();
+                    log(`分片 #${chunk.index} 下载完成 (${formatSize(blob.size)})`, 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (err) {
+                updateChunkStatus(chunk.index, 'failed');
+                log(`分片 #${chunk.index} 下载失败: ${err.message}`, 'error');
+            }
+        }
+
+        // 更新速度图表
+        function updateSpeed(speed) {
+            speedHistory.push(speed);
+            if (speedHistory.length > 60) speedHistory.shift();
+            
+            document.getElementById('statSpeed').textContent = speed.toFixed(1);
+            
+            // 绘制速度图表
+            const chart = document.getElementById('speedChart');
+            const maxSpeed = Math.max(...speedHistory, 100);
+            chart.innerHTML = speedHistory.map((s, i) => `
+                <div class="speed-bar" style="left: ${i * 2}px; height: ${(s / maxSpeed) * 100}%"></div>
+            `).join('');
+        }
+
+        // 更新进度
+        function updateProgress() {
+            const completed = chunks.filter(c => c.status === 'completed').length;
+            const failed = chunks.filter(c => c.status === 'failed').length;
+            const total = chunks.length;
+            const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressFill').textContent = percent + '%';
+            document.getElementById('statCompleted').textContent = completed;
+            document.getElementById('statFailed').textContent = failed;
+        }
+
+        // 暂停下载
+        function pauseDownload() {
+            isPaused = !isPaused;
+            log(isPaused ? '下载已暂停' : '下载继续', 'info');
+        }
+
+        // 取消下载
+        async function cancelDownload() {
+            isDownloading = false;
+            isPaused = false;
+            
+            const taskId = document.getElementById('taskId').value;
+            if (taskId) {
+                try {
+                    const serverUrl = document.getElementById('serverUrl').value;
+                    await fetch(`${serverUrl}/api/download/tasks/${taskId}`, {
+                        method: 'DELETE'
+                    });
+                    log('下载任务已取消', 'info');
+                } catch (err) {
+                    log(`取消任务失败: ${err.message}`, 'error');
+                }
+            }
+        }
+
+        // 获取任务状态
+        async function getTaskStatus() {
+            const taskId = document.getElementById('taskId').value;
+            if (!taskId) {
+                log('请输入任务 ID', 'error');
+                return;
+            }
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                const response = await fetch(`${serverUrl}/api/download/tasks/${taskId}/status`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`任务状态: ${data.state}, 已下载: ${formatSize(data.downloadedBytes)}`, 'info');
+                    showStatus('taskStatus', `状态: ${data.state}, 进度: ${data.progressPercent.toFixed(2)}%`, 'info');
+                } else {
+                    log(`获取状态失败: ${data.message}`, 'error');
+                }
+            } catch (err) {
+                log(`获取状态错误: ${err.message}`, 'error');
+            }
+        }
+
+        // 页面加载
+        document.addEventListener('DOMContentLoaded', () => {
+            log('服务器代理下载测试客户端已就绪', 'info');
+        });
+    </script>
+</body>
+</html>

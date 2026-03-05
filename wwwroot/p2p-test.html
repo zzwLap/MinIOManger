@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P 分片下载测试客户端</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 30px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            border-bottom: 2px solid #007bff;
+            padding-bottom: 10px;
+        }
+        .subtitle {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 20px;
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        .section h2 {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 18px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #555;
+        }
+        input[type="text"], input[type="number"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        input[type="text"]:focus, input[type="number"]:focus {
+            outline: none;
+            border-color: #007bff;
+        }
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            transition: all 0.3s;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #1e7e34;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #545b62;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .log-container {
+            background: #212529;
+            color: #fff;
+            padding: 15px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+            margin-top: 15px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 3px 0;
+            border-bottom: 1px solid #333;
+        }
+        .log-time {
+            color: #6c757d;
+            margin-right: 10px;
+        }
+        .log-info { color: #17a2b8; }
+        .log-success { color: #28a745; }
+        .log-error { color: #dc3545; }
+        .log-warn { color: #ffc107; }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            transition: width 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+        }
+        .peer-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .peer-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #dee2e6;
+        }
+        .peer-card h4 {
+            margin-bottom: 10px;
+            color: #007bff;
+        }
+        .peer-info {
+            font-size: 13px;
+            color: #666;
+        }
+        .piece-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(30px, 1fr));
+            gap: 3px;
+            margin-top: 10px;
+        }
+        .piece {
+            aspect-ratio: 1;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            color: white;
+        }
+        .piece.pending { background: #6c757d; }
+        .piece.downloading { background: #ffc107; }
+        .piece.completed { background: #28a745; }
+        .piece.failed { background: #dc3545; }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 P2P 分片下载测试客户端</h1>
+        <p class="subtitle">基于 SignalR + WebRTC 的 P2P 文件传输测试工具</p>
+
+        <!-- 连接配置 -->
+        <div class="section">
+            <h2>🔌 连接配置</h2>
+            <div class="form-group">
+                <label>服务器地址</label>
+                <input type="text" id="serverUrl" value="http://localhost:5000" placeholder="http://localhost:5000">
+            </div>
+            <div class="form-group">
+                <label>SignalR Hub 地址</label>
+                <input type="text" id="hubUrl" value="/p2phub" placeholder="/p2phub">
+            </div>
+            <button class="btn btn-primary" onclick="connect()">连接服务器</button>
+            <button class="btn btn-danger" onclick="disconnect()">断开连接</button>
+            <div id="connectionStatus" class="status info" style="display: none;"></div>
+        </div>
+
+        <!-- P2P 会话管理 -->
+        <div class="section">
+            <h2>📁 P2P 会话管理</h2>
+            <div class="form-group">
+                <label>文件版本 ID</label>
+                <input type="text" id="fileVersionId" placeholder="输入文件版本 GUID">
+            </div>
+            <div class="form-group">
+                <label>分片大小 (MB)</label>
+                <input type="number" id="pieceSize" value="2" min="1" max="10">
+            </div>
+            <button class="btn btn-primary" onclick="createSession()">创建 P2P 会话</button>
+            <button class="btn btn-success" onclick="joinSession()">加入会话</button>
+            <button class="btn btn-secondary" onclick="getSessionInfo()">获取会话信息</button>
+            <div id="sessionStatus" class="status info" style="display: none;"></div>
+        </div>
+
+        <!-- 下载控制 -->
+        <div class="section">
+            <h2>⬇️ 下载控制</h2>
+            <div class="form-group">
+                <label>会话 ID</label>
+                <input type="text" id="sessionId" placeholder="P2P 会话 GUID">
+            </div>
+            <div class="form-group">
+                <label>Peer ID (自动生成)</label>
+                <input type="text" id="peerId" readonly placeholder="点击加入会话生成">
+            </div>
+            <button class="btn btn-primary" onclick="getDownloadPlan()">获取下载计划</button>
+            <button class="btn btn-success" onclick="startDownload()">开始 P2P 下载</button>
+            <button class="btn btn-secondary" onclick="getPeers()">获取 Peer 列表</button>
+            <button class="btn btn-danger" onclick="leaveSession()">离开会话</button>
+            
+            <div class="progress-bar" style="display: none;" id="progressBar">
+                <div class="progress-fill" id="progressFill" style="width: 0%">0%</div>
+            </div>
+        </div>
+
+        <!-- 统计信息 -->
+        <div class="section">
+            <h2>📊 实时统计</h2>
+            <div class="stats">
+                <div class="stat-card">
+                    <div class="stat-value" id="statTotalPieces">0</div>
+                    <div class="stat-label">总分片数</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statCompletedPieces">0</div>
+                    <div class="stat-label">已完成</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statActivePeers">0</div>
+                    <div class="stat-label">活跃 Peer</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="statDownloadSpeed">0</div>
+                    <div class="stat-label">下载速度 (KB/s)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Peer 列表 -->
+        <div class="section">
+            <h2>👥 Peer 列表</h2>
+            <div class="peer-list" id="peerList">
+                <p style="color: #666; text-align: center; padding: 20px;">暂无 Peer 信息</p>
+            </div>
+        </div>
+
+        <!-- 分片状态 -->
+        <div class="section">
+            <h2>🧩 分片下载状态</h2>
+            <div class="piece-grid" id="pieceGrid">
+                <!-- 动态生成分片状态 -->
+            </div>
+        </div>
+
+        <!-- 日志输出 -->
+        <div class="section">
+            <h2>📝 操作日志</h2>
+            <button class="btn btn-secondary" onclick="clearLogs()">清空日志</button>
+            <div class="log-container" id="logContainer">
+                <div class="log-entry">
+                    <span class="log-time">[系统]</span>
+                    <span class="log-info">P2P 测试客户端已加载，等待连接...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let connection = null;
+        let currentSessionId = null;
+        let currentPeerId = null;
+        let downloadPlan = null;
+        let downloadedPieces = new Set();
+        let pieceStatus = new Map();
+
+        // 生成唯一 Peer ID
+        function generatePeerId() {
+            return 'peer_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // 日志记录
+        function log(message, type = 'info') {
+            const container = document.getElementById('logContainer');
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `
+                <span class="log-time">[${time}]</span>
+                <span class="log-${type}">${message}</span>
+            `;
+            container.appendChild(entry);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function clearLogs() {
+            document.getElementById('logContainer').innerHTML = '';
+            log('日志已清空', 'info');
+        }
+
+        // 显示状态
+        function showStatus(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.className = `status ${type}`;
+            element.style.display = 'block';
+        }
+
+        // 连接服务器
+        async function connect() {
+            const serverUrl = document.getElementById('serverUrl').value;
+            const hubUrl = document.getElementById('hubUrl').value;
+
+            log(`正在连接到 ${serverUrl}${hubUrl}...`, 'info');
+
+            try {
+                connection = new signalR.HubConnectionBuilder()
+                    .withUrl(serverUrl + hubUrl)
+                    .withAutomaticReconnect()
+                    .configureLogging(signalR.LogLevel.Information)
+                    .build();
+
+                // 注册事件处理
+                connection.on('SessionJoined', (data) => {
+                    log(`成功加入会话: ${data.sessionId}`, 'success');
+                    currentSessionId = data.sessionId;
+                    document.getElementById('sessionId').value = data.sessionId;
+                    showStatus('sessionStatus', `已加入会话，总分片: ${data.totalPieces}`, 'success');
+                    updateStats(data);
+                });
+
+                connection.on('PeerJoined', (data) => {
+                    log(`新 Peer 加入: ${data.peerId}，拥有 ${data.pieceCount} 个分片`, 'info');
+                    getPeers();
+                });
+
+                connection.on('PeerLeft', (data) => {
+                    log(`Peer 离开: ${data.peerId}`, 'warn');
+                    getPeers();
+                });
+
+                connection.on('PeerPiecesUpdated', (data) => {
+                    log(`Peer ${data.peerId} 更新了分片: ${data.pieceCount} 个`, 'info');
+                });
+
+                connection.on('SessionCompleted', (data) => {
+                    log('会话已完成！', 'success');
+                    showStatus('sessionStatus', '会话已完成', 'success');
+                });
+
+                connection.on('PieceSourceResponse', (data) => {
+                    log(`分片 ${data.pieceIndex} 的最优源: ${data.sourceType} (${data.peerId || 'Server'})`, 'info');
+                });
+
+                connection.on('PeersList', (peers) => {
+                    updatePeerList(peers);
+                });
+
+                connection.on('Error', (data) => {
+                    log(`错误: ${data.message}`, 'error');
+                });
+
+                await connection.start();
+                log('SignalR 连接成功！', 'success');
+                showStatus('connectionStatus', '已连接到服务器', 'success');
+            } catch (err) {
+                log(`连接失败: ${err.message}`, 'error');
+                showStatus('connectionStatus', `连接失败: ${err.message}`, 'error');
+            }
+        }
+
+        // 断开连接
+        async function disconnect() {
+            if (connection) {
+                await connection.stop();
+                log('已断开连接', 'info');
+                showStatus('connectionStatus', '已断开', 'info');
+                connection = null;
+            }
+        }
+
+        // 创建 P2P 会话
+        async function createSession() {
+            const fileVersionId = document.getElementById('fileVersionId').value;
+            const pieceSize = parseInt(document.getElementById('pieceSize').value) * 1024 * 1024;
+
+            if (!fileVersionId) {
+                log('请输入文件版本 ID', 'error');
+                return;
+            }
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                const response = await fetch(`${serverUrl}/api/p2p/sessions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        fileVersionId: fileVersionId,
+                        pieceSize: pieceSize
+                    })
+                });
+
+                const data = await response.json();
+                if (response.ok) {
+                    log(`P2P 会话创建成功: ${data.sessionId}`, 'success');
+                    currentSessionId = data.sessionId;
+                    document.getElementById('sessionId').value = data.sessionId;
+                    showStatus('sessionStatus', `会话创建成功，总分片: ${data.totalPieces}`, 'success');
+                    initPieceGrid(data.totalPieces);
+                } else {
+                    log(`创建会话失败: ${data.message}`, 'error');
+                }
+            } catch (err) {
+                log(`创建会话错误: ${err.message}`, 'error');
+            }
+        }
+
+        // 加入会话
+        async function joinSession() {
+            const sessionId = document.getElementById('sessionId').value;
+            if (!sessionId) {
+                log('请输入会话 ID', 'error');
+                return;
+            }
+
+            currentPeerId = generatePeerId();
+            document.getElementById('peerId').value = currentPeerId;
+
+            try {
+                await connection.invoke('JoinSession', sessionId, currentPeerId, false);
+                log(`已发送加入会话请求: ${sessionId}`, 'info');
+            } catch (err) {
+                log(`加入会话失败: ${err.message}`, 'error');
+            }
+        }
+
+        // 获取会话信息
+        async function getSessionInfo() {
+            const sessionId = document.getElementById('sessionId').value;
+            if (!sessionId) {
+                log('请输入会话 ID', 'error');
+                return;
+            }
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                const response = await fetch(`${serverUrl}/api/p2p/sessions/${sessionId}`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    log(`会话信息: ${data.fileName}, 完成率: ${data.completionRate}%`, 'info');
+                    updateStats(data);
+                } else {
+                    log(`获取会话信息失败: ${data.message}`, 'error');
+                }
+            } catch (err) {
+                log(`获取会话信息错误: ${err.message}`, 'error');
+            }
+        }
+
+        // 获取下载计划
+        async function getDownloadPlan() {
+            const sessionId = document.getElementById('sessionId').value;
+            const peerId = document.getElementById('peerId').value;
+
+            if (!sessionId || !peerId) {
+                log('请输入会话 ID 和 Peer ID', 'error');
+                return;
+            }
+
+            try {
+                const serverUrl = document.getElementById('serverUrl').value;
+                const response = await fetch(`${serverUrl}/api/p2p/sessions/${sessionId}/peers/${peerId}/plan`);
+                const data = await response.json();
+
+                if (response.ok) {
+                    downloadPlan = data;
+                    log(`获取下载计划成功: ${data.tasks.length} 个任务`, 'success');
+                    displayDownloadPlan(data);
+                } else {
+                    log(`获取下载计划失败: ${data.message}`, 'error');
+                }
+            } catch (err) {
+                log(`获取下载计划错误: ${err.message}`, 'error');
+            }
+        }
+
+        // 开始下载
+        async function startDownload() {
+            if (!downloadPlan) {
+                log('请先获取下载计划', 'error');
+                return;
+            }
+
+            log('开始 P2P 下载...', 'info');
+            document.getElementById('progressBar').style.display = 'block';
+
+            // 模拟下载过程
+            for (const task of downloadPlan.tasks) {
+                pieceStatus.set(task.pieceIndex, 'downloading');
+                updatePieceGrid();
+
+                // 模拟下载延迟
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                pieceStatus.set(task.pieceIndex, 'completed');
+                downloadedPieces.add(task.pieceIndex);
+                updatePieceGrid();
+                updateProgress();
+
+                log(`分片 ${task.pieceIndex} 下载完成`, 'success');
+
+                // 上报拥有的分片
+                if (connection && currentSessionId) {
+                    await connection.invoke('UpdatePieces', currentSessionId, currentPeerId, 
+                        Array.from(downloadedPieces));
+                }
+            }
+
+            log('所有分片下载完成！', 'success');
+        }
+
+        // 获取 Peer 列表
+        async function getPeers() {
+            const sessionId = document.getElementById('sessionId').value;
+            if (!sessionId) return;
+
+            try {
+                await connection.invoke('GetPeers', sessionId);
+            } catch (err) {
+                log(`获取 Peer 列表失败: ${err.message}`, 'error');
+            }
+        }
+
+        // 离开会话
+        async function leaveSession() {
+            const sessionId = document.getElementById('sessionId').value;
+            const peerId = document.getElementById('peerId').value;
+
+            if (!sessionId || !peerId) {
+                log('请输入会话 ID 和 Peer ID', 'error');
+                return;
+            }
+
+            try {
+                await connection.invoke('LeaveSession', sessionId, peerId);
+                log('已离开会话', 'info');
+                currentSessionId = null;
+                downloadedPieces.clear();
+                pieceStatus.clear();
+            } catch (err) {
+                log(`离开会话失败: ${err.message}`, 'error');
+            }
+        }
+
+        // 更新统计
+        function updateStats(data) {
+            document.getElementById('statTotalPieces').textContent = data.totalPieces || 0;
+            document.getElementById('statCompletedPieces').textContent = data.completedPieces || 0;
+            document.getElementById('statActivePeers').textContent = data.activePeerCount || 0;
+        }
+
+        // 更新 Peer 列表显示
+        function updatePeerList(peers) {
+            const container = document.getElementById('peerList');
+            if (!peers || peers.length === 0) {
+                container.innerHTML = '<p style="color: #666; text-align: center; padding: 20px;">暂无 Peer 信息</p>';
+                return;
+            }
+
+            container.innerHTML = peers.map(peer => `
+                <div class="peer-card">
+                    <h4>${peer.peerId}</h4>
+                    <div class="peer-info">
+                        <p>IP: ${peer.ipAddress}</p>
+                        <p>拥有分片: ${peer.pieceCount} 个</p>
+                        <p>上传速度: ${(peer.uploadSpeed / 1024).toFixed(2)} KB/s</p>
+                        <p>下载速度: ${(peer.downloadSpeed / 1024).toFixed(2)} KB/s</p>
+                        <p>状态: ${peer.status}</p>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 初始化分片网格
+        function initPieceGrid(totalPieces) {
+            const container = document.getElementById('pieceGrid');
+            container.innerHTML = '';
+            for (let i = 0; i < totalPieces; i++) {
+                pieceStatus.set(i, 'pending');
+            }
+            updatePieceGrid();
+        }
+
+        // 更新分片网格
+        function updatePieceGrid() {
+            const container = document.getElementById('pieceGrid');
+            container.innerHTML = '';
+            pieceStatus.forEach((status, index) => {
+                const piece = document.createElement('div');
+                piece.className = `piece ${status}`;
+                piece.textContent = index;
+                container.appendChild(piece);
+            });
+        }
+
+        // 更新进度条
+        function updateProgress() {
+            const total = pieceStatus.size;
+            const completed = downloadedPieces.size;
+            const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
+            
+            document.getElementById('progressFill').style.width = percent + '%';
+            document.getElementById('progressFill').textContent = percent + '%';
+            document.getElementById('statCompletedPieces').textContent = completed;
+        }
+
+        // 显示下载计划
+        function displayDownloadPlan(data) {
+            log(`下载计划详情:`, 'info');
+            data.tasks.slice(0, 5).forEach(task => {
+                log(`  分片 ${task.pieceIndex}: ${task.sourceType} - ${task.start}-${task.end}`, 'info');
+            });
+            if (data.tasks.length > 5) {
+                log(`  ... 还有 ${data.tasks.length - 5} 个任务`, 'info');
+            }
+        }
+
+        // 页面加载完成
+        document.addEventListener('DOMContentLoaded', () => {
+            log('P2P 测试客户端已就绪', 'info');
+        });
+    </script>
+</body>
+</html>

@@ -156,6 +156,9 @@ app.UseHttpsRedirection();
 // Use CORS before other middleware
 app.UseCors("AllowAll");
 
+// Enable static files (for test clients)
+app.UseStaticFiles();
+
 app.UseAuthorization();
 app.MapControllers();
 
