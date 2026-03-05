@@ -170,6 +170,39 @@ public class LocalFileProvider : IStorageProvider
         return Task.FromResult(url);
     }
 
+    public async Task<ObjectMetadata> GetObjectMetadataAsync(string objectName, CancellationToken cancellationToken = default)
+    {
+        var filePath = GetFullPath(objectName);
+        
+        if (!File.Exists(filePath))
+        {
+            throw new FileNotFoundException($"File not found: {objectName}");
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        
+        // 计算文件哈希作为 ETag
+        string etag;
+        using (var md5 = System.Security.Cryptography.MD5.Create())
+        await using (var stream = File.OpenRead(filePath))
+        {
+            var hash = await md5.ComputeHashAsync(stream, cancellationToken);
+            etag = Convert.ToHexString(hash);
+        }
+        
+        _logger.LogDebug("Retrieved metadata for local file {ObjectName}: ETag={ETag}, LastModified={LastModified}, Size={Size}",
+            objectName, etag, fileInfo.LastWriteTimeUtc, fileInfo.Length);
+        
+        return new ObjectMetadata
+        {
+            ObjectName = objectName,
+            ETag = etag,
+            LastModified = fileInfo.LastWriteTimeUtc,
+            Size = fileInfo.Length,
+            ContentType = null
+        };
+    }
+
     private string GetFullPath(string objectName)
     {
         // 将对象名称中的 / 转换为路径分隔符

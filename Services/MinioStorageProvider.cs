@@ -155,6 +155,33 @@ public class MinioStorageProvider : IStorageProvider
         return url;
     }
 
+    public async Task<ObjectMetadata> GetObjectMetadataAsync(string objectName, CancellationToken cancellationToken = default)
+    {
+        var statObjectArgs = new StatObjectArgs()
+            .WithBucket(_bucketName)
+            .WithObject(objectName);
+
+        var stat = await _minioClient.StatObjectAsync(statObjectArgs, cancellationToken);
+        
+        // MinIO 的 ETag 通常包含引号，需要去除
+        var etag = stat.ETag?.Trim('"') ?? string.Empty;
+        
+        // 将 UTC 时间转换为本地时间
+        var lastModified = stat.LastModified;
+        
+        _logger.LogDebug("Retrieved metadata for {ObjectName}: ETag={ETag}, LastModified={LastModified}, Size={Size}",
+            objectName, etag, lastModified, stat.Size);
+        
+        return new ObjectMetadata
+        {
+            ObjectName = objectName,
+            ETag = etag,
+            LastModified = lastModified,
+            Size = stat.Size,
+            ContentType = stat.ContentType
+        };
+    }
+
     private async Task EnsureBucketExistsAsync(CancellationToken cancellationToken)
     {
         var bucketExistsArgs = new BucketExistsArgs()

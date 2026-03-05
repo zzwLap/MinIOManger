@@ -92,9 +92,23 @@ public class FileCacheService : IFileCacheService
             : $"{folder.TrimEnd('/')}/{fileName}";
 
         // 上传到存储提供者
+        string? remoteETag = null;
+        DateTime? remoteLastModified = null;
         using (var stream = file.OpenReadStream())
         {
             await _storageProvider.UploadAsync(objectName, stream, file.ContentType, cancellationToken);
+            
+            // 获取上传后对象的元数据（ETag）
+            try
+            {
+                var metadata = await _storageProvider.GetObjectMetadataAsync(objectName, cancellationToken);
+                remoteETag = metadata.ETag;
+                remoteLastModified = metadata.LastModified;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get object metadata after upload, will use local hash as fallback");
+            }
         }
 
         // 保存到本地缓存
@@ -116,7 +130,10 @@ public class FileCacheService : IFileCacheService
             ChangeDescription = changeDescription ?? (newVersionNumber == 1 ? "初始版本" : $"版本 {newVersionNumber}"),
             IsLatest = true,
             LocalCachePath = localPath,
-            IsCachedLocally = true
+            IsCachedLocally = true,
+            ETag = remoteETag ?? fileHash,  // 优先使用远程 ETag，否则使用本地哈希
+            LastModified = remoteLastModified ?? DateTime.UtcNow,
+            MetadataCacheExpiry = DateTime.UtcNow.AddMinutes(5)  // 元数据缓存5分钟
         };
 
         _dbContext.FileVersions.Add(fileVersion);
@@ -373,23 +390,99 @@ public class FileCacheService : IFileCacheService
 
     #region 私有辅助方法
 
-    private async Task<(Stream Stream, FileVersion Version)> GetVersionStreamAsync(FileVersion version, CancellationToken cancellationToken)
+    /// <summary>
+    /// 分层验证本地缓存是否有效（零流量消耗优先）
+    /// </summary>
+    /// <param name="version">文件版本</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>缓存有效返回true，需要重新下载返回false</returns>
+    private async Task<bool> IsLocalCacheValidAsync(FileVersion version, CancellationToken cancellationToken)
     {
-        // 检查本地缓存
-        if (!string.IsNullOrEmpty(version.LocalCachePath) && File.Exists(version.LocalCachePath))
+        // 第一层检查：本地缓存文件是否存在
+        if (string.IsNullOrEmpty(version.LocalCachePath) || !File.Exists(version.LocalCachePath))
         {
+            _logger.LogDebug("Local cache file not found for version: {VersionId}", version.Id);
+            return false;
+        }
+
+        // 第二层检查：元数据缓存是否未过期（快速路径，零远程请求）
+        if (version.MetadataCacheExpiry.HasValue && version.MetadataCacheExpiry.Value > DateTime.UtcNow)
+        {
+            // 元数据缓存未过期，直接信任本地缓存
+            // 但仍需验证本地文件哈希是否与记录一致（防止本地文件被篡改）
             var localHash = await CalculateFileHashAsync(version.LocalCachePath, cancellationToken);
             if (localHash.Equals(version.FileHash, StringComparison.OrdinalIgnoreCase))
             {
-                _logger.LogDebug("Using local cache for version: {VersionId}", version.Id);
-                var localStream = File.OpenRead(version.LocalCachePath);
-                return (localStream, version);
+                _logger.LogDebug("Metadata cache valid, local hash matches for version: {VersionId}", version.Id);
+                return true;
             }
             
-            _logger.LogWarning("Local cache hash mismatch for version: {VersionId}, will re-download", version.Id);
+            _logger.LogWarning("Local file hash mismatch for version: {VersionId}, will re-download", version.Id);
+            return false;
         }
 
-        // 从存储下载并更新缓存
+        // 第三层检查：通过 HEAD 请求对比远程 ETag（无流量消耗）
+        if (!string.IsNullOrEmpty(version.ETag))
+        {
+            try
+            {
+                var remoteMetadata = await _storageProvider.GetObjectMetadataAsync(version.ObjectName, cancellationToken);
+                
+                if (remoteMetadata.ETag.Equals(version.ETag, StringComparison.OrdinalIgnoreCase))
+                {
+                    // ETag 匹配，更新元数据缓存时间
+                    version.MetadataCacheExpiry = DateTime.UtcNow.AddMinutes(5);
+                    version.LastModified = remoteMetadata.LastModified;
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    
+                    _logger.LogDebug("ETag match for version: {VersionId}, metadata cache refreshed", version.Id);
+                    return true;
+                }
+                
+                _logger.LogInformation("ETag mismatch for version: {VersionId}. Local: {LocalETag}, Remote: {RemoteETag}", 
+                    version.Id, version.ETag, remoteMetadata.ETag);
+                
+                // ETag 不匹配，需要更新数据库记录
+                version.ETag = remoteMetadata.ETag;
+                version.LastModified = remoteMetadata.LastModified;
+                version.Size = remoteMetadata.Size;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get remote metadata for version: {VersionId}, falling back to hash verification", version.Id);
+                // 获取元数据失败，回退到哈希验证
+            }
+        }
+
+        // 第四层检查：完整哈希验证（需要读取本地文件，但无需下载）
+        var currentLocalHash = await CalculateFileHashAsync(version.LocalCachePath, cancellationToken);
+        if (currentLocalHash.Equals(version.FileHash, StringComparison.OrdinalIgnoreCase))
+        {
+            // 哈希匹配，更新元数据缓存
+            version.MetadataCacheExpiry = DateTime.UtcNow.AddMinutes(5);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            
+            _logger.LogDebug("Hash verification passed for version: {VersionId}, metadata cache refreshed", version.Id);
+            return true;
+        }
+
+        _logger.LogInformation("Hash mismatch for version: {VersionId}. Expected: {Expected}, Got: {Got}", 
+            version.Id, version.FileHash, currentLocalHash);
+        return false;
+    }
+
+    private async Task<(Stream Stream, FileVersion Version)> GetVersionStreamAsync(FileVersion version, CancellationToken cancellationToken)
+    {
+        // 使用分层验证检查本地缓存
+        if (await IsLocalCacheValidAsync(version, cancellationToken))
+        {
+            _logger.LogDebug("Using local cache for version: {VersionId}", version.Id);
+            var localStream = File.OpenRead(version.LocalCachePath!);
+            return (localStream, version);
+        }
+
+        // 缓存无效，从存储下载并更新
+        _logger.LogInformation("Local cache invalid for version: {VersionId}, downloading from remote...", version.Id);
         await DownloadAndCacheAsync(version, cancellationToken);
         
         var stream = File.OpenRead(version.LocalCachePath!);
@@ -431,13 +524,32 @@ public class FileCacheService : IFileCacheService
                 File.Move(tempPath, finalPath);
             }
 
+            // 获取远程元数据（ETag）
+            string? remoteETag = null;
+            DateTime? remoteLastModified = null;
+            try
+            {
+                var metadata = await _storageProvider.GetObjectMetadataAsync(version.ObjectName, cancellationToken);
+                remoteETag = metadata.ETag;
+                remoteLastModified = metadata.LastModified;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to get metadata after download for version: {VersionId}", version.Id);
+            }
+
             // 更新版本记录
             version.LocalCachePath = finalPath;
             version.IsCachedLocally = true;
+            version.FileHash = downloadedHash;
+            version.ETag = remoteETag ?? downloadedHash;
+            version.LastModified = remoteLastModified ?? DateTime.UtcNow;
+            version.MetadataCacheExpiry = DateTime.UtcNow.AddMinutes(5);
             
             await _dbContext.SaveChangesAsync(cancellationToken);
 
-            _logger.LogInformation("Version cached: {VersionId}, Hash: {Hash}", version.Id, downloadedHash);
+            _logger.LogInformation("Version cached: {VersionId}, Hash: {Hash}, ETag: {ETag}", 
+                version.Id, downloadedHash, version.ETag);
         }
         catch
         {

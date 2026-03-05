@@ -72,6 +72,21 @@ public class FileVersion
     /// </summary>
     public bool IsCachedLocally { get; set; }
     
+    /// <summary>
+    /// 远程存储对象的 ETag（用于快速验证缓存一致性）
+    /// </summary>
+    public string? ETag { get; set; }
+    
+    /// <summary>
+    /// 远程存储对象的最后修改时间
+    /// </summary>
+    public DateTime? LastModified { get; set; }
+    
+    /// <summary>
+    /// 本地元数据缓存过期时间（用于减少远程请求频率）
+    /// </summary>
+    public DateTime? MetadataCacheExpiry { get; set; }
+    
     // 导航属性
     public FileRecord FileRecord { get; set; } = null!;
 }
