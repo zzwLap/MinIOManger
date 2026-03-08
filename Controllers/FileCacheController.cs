@@ -338,4 +338,56 @@ public class FileCacheController : ControllerBase
             return StatusCode(500, new { message = "清理过期缓存失败", error = ex.Message });
         }
     }
+
+    /// <summary>
+    /// 从远程存储获取文件并保存到本地数据库（如果本地不存在）
+    /// </summary>
+    /// <param name="objectName">远程存储中的对象名称</param>
+    /// <param name="fileName">文件名（用于创建本地记录）</param>
+    /// <param name="contentType">内容类型</param>
+    /// <param name="description">文件描述</param>
+    /// <param name="tags">标签</param>
+    [HttpPost("sync-from-remote")]
+    public async Task<IActionResult> SyncFromRemote(
+        [FromQuery] string objectName,
+        [FromQuery] string fileName,
+        [FromQuery] string? contentType = null,
+        [FromQuery] string? description = null,
+        [FromQuery] string? tags = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(objectName) || string.IsNullOrWhiteSpace(fileName))
+        {
+            return BadRequest(new { message = "objectName 和 fileName 不能为空" });
+        }
+
+        try
+        {
+            var version = await _fileCacheService.GetOrCreateFromRemoteAsync(
+                objectName, fileName, contentType, description, tags, cancellationToken);
+
+            if (version == null)
+            {
+                return NotFound(new { message = "远程存储中不存在该文件", objectName });
+            }
+
+            return Ok(new
+            {
+                message = "文件已从远程存储同步到本地",
+                fileId = version.FileRecordId,
+                versionId = version.Id,
+                fileName = fileName,
+                objectName = version.ObjectName,
+                size = version.Size,
+                fileHash = version.FileHash,
+                isCachedLocally = version.IsCachedLocally,
+                createdAt = version.CreatedAt
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "从远程存储同步文件失败: {ObjectName}", objectName);
+            return StatusCode(500, new { message = "同步文件失败", error = ex.Message });
+        }
+    }
 }

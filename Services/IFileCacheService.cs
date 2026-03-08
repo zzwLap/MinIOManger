@@ -71,4 +71,22 @@ public interface IFileCacheService
     /// 清理过期的本地缓存
     /// </summary>
     Task<int> CleanExpiredCacheAsync(TimeSpan maxAge, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 从远程存储获取文件并保存到本地数据库（如果本地不存在）
+    /// </summary>
+    /// <param name="objectName">远程存储中的对象名称</param>
+    /// <param name="fileName">文件名（用于创建本地记录）</param>
+    /// <param name="contentType">内容类型</param>
+    /// <param name="description">文件描述</param>
+    /// <param name="tags">标签</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>获取或创建的文件版本记录，如果远程不存在则返回null</returns>
+    Task<FileVersion?> GetOrCreateFromRemoteAsync(
+        string objectName, 
+        string fileName, 
+        string? contentType = null,
+        string? description = null, 
+        string? tags = null,
+        CancellationToken cancellationToken = default);
 }

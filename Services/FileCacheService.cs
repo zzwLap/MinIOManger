@@ -579,4 +579,119 @@ public class FileCacheService : IFileCacheService
     }
 
     #endregion
+
+    #region 从远程存储获取文件
+
+    public async Task<FileVersion?> GetOrCreateFromRemoteAsync(
+        string objectName, 
+        string fileName, 
+        string? contentType = null,
+        string? description = null, 
+        string? tags = null,
+        CancellationToken cancellationToken = default)
+    {
+        // 1. 先检查本地数据库是否已存在该文件
+        var existingRecord = await _dbContext.FileRecords
+            .Include(f => f.Versions)
+            .FirstOrDefaultAsync(f => f.FileName == fileName && !f.IsDeleted, cancellationToken);
+
+        if (existingRecord != null && existingRecord.CurrentVersionId.HasValue)
+        {
+            _logger.LogInformation("File already exists in local database: {FileName}", fileName);
+            // 返回现有版本
+            var existingVersion = await _dbContext.FileVersions
+                .FirstOrDefaultAsync(v => v.Id == existingRecord.CurrentVersionId.Value, cancellationToken);
+            return existingVersion;
+        }
+
+        // 2. 检查远程存储是否存在该文件
+        bool exists = await _storageProvider.ExistsAsync(objectName, cancellationToken);
+        if (!exists)
+        {
+            _logger.LogWarning("File not found in remote storage: {ObjectName}", objectName);
+            return null;
+        }
+
+        _logger.LogInformation("File found in remote storage, downloading: {ObjectName}", objectName);
+
+        // 3. 获取远程文件的元数据
+        var metadata = await _storageProvider.GetObjectMetadataAsync(objectName, cancellationToken);
+        
+        // 4. 下载文件到临时位置
+        var tempPath = Path.Combine(_cacheDirectory, $"{Guid.NewGuid()}.tmp");
+        try
+        {
+            using (var fileStream = File.Create(tempPath))
+            {
+                await _storageProvider.DownloadAsync(objectName, fileStream, cancellationToken);
+            }
+
+            // 5. 计算文件哈希
+            var fileHash = await CalculateFileHashAsync(tempPath, cancellationToken);
+
+            // 6. 移动到最终缓存位置（使用哈希作为文件名）
+            var finalCachePath = Path.Combine(_cacheDirectory, fileHash);
+            if (File.Exists(finalCachePath))
+            {
+                // 如果已存在相同哈希的文件，删除临时文件
+                File.Delete(tempPath);
+            }
+            else
+            {
+                File.Move(tempPath, finalCachePath);
+            }
+
+            // 7. 创建文件记录
+            var fileRecord = new FileRecord
+            {
+                FileName = fileName,
+                ContentType = contentType ?? metadata.ContentType ?? "application/octet-stream",
+                Description = description,
+                Tags = tags
+            };
+            _dbContext.FileRecords.Add(fileRecord);
+
+            // 8. 创建版本记录
+            var fileVersion = new FileVersion
+            {
+                FileRecordId = fileRecord.Id,
+                VersionNumber = 1,
+                ObjectName = objectName,
+                FileHash = fileHash,
+                Size = metadata.Size,
+                ChangeDescription = "从远程存储同步",
+                IsLatest = true,
+                LocalCachePath = finalCachePath,
+                IsCachedLocally = true,
+                ETag = metadata.ETag,
+                LastModified = metadata.LastModified,
+                MetadataCacheExpiry = DateTime.UtcNow.AddMinutes(5)
+            };
+            _dbContext.FileVersions.Add(fileVersion);
+
+            // 9. 保存到数据库
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            // 10. 更新文件记录的当前版本
+            fileRecord.CurrentVersionId = fileVersion.Id;
+            fileRecord.VersionCount = 1;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation("File downloaded and saved to local database: {FileName}, Version: {VersionId}, Hash: {Hash}", 
+                fileName, fileVersion.Id, fileHash);
+
+            return fileVersion;
+        }
+        catch
+        {
+            // 清理临时文件
+            if (File.Exists(tempPath))
+            {
+                File.Delete(tempPath);
+            }
+            throw;
+        }
+    }
+
+    #endregion
 }
